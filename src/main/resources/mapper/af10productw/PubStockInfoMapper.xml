@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.analyse.analysestock.af10product.mapper.PubStockInfoMapper">
+
+    <resultMap id="BaseResultMap" type="org.analyse.analysestock.af10product.entity.PubStockInfo">
+        <id column="SecurityID" property="securityID" />
+        <result column="InstitutionId" property="institutionId" />
+        <result column="InstitutionName" property="institutionName" />
+        <result column="Symbol" property="symbol" />
+        <result column="ShortName" property="shortName" />
+        <result column="PYShortName" property="pyShortName" />
+        <result column="ISIN" property="isin" />
+        <result column="ListingDate" property="listingDate" />
+        <result column="DelistDate" property="delistDate" />
+        <result column="FaceValue" property="faceValue" />
+        <result column="IssuePrice" property="issuePrice" />
+        <result column="Currency" property="currency" />
+        <result column="Markets" property="markets" />
+        <result column="Sector" property="sector" />
+        <result column="ShareClasses" property="shareClasses" />
+        <result column="ListedStatus" property="listedStatus" />
+        <result column="CreateTime" property="createTime" />
+        <result column="ModifyTime" property="modifyTime" />
+        <result column="DataFrom" property="dataFrom" />
+        <result column="STStatus" property="stStatus" />
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        SecurityID, InstitutionId, InstitutionName, Symbol, ShortName, PYShortName, ISIN, ListingDate, DelistDate, FaceValue, IssuePrice, Currency, Markets, Sector, ShareClasses, ListedStatus, CreateTime, ModifyTime, DataFrom, STStatus
+    </sql>
+
+</mapper>
