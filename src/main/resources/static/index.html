@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A股尾盘策略评分系统</title>
+    <!-- 使用更现代的字体和图标 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --accent-color: #3498db;
+        }
+        body { 
+            padding-top: 30px; 
+            background-color: #f4f7f6; 
+            font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            color: #333;
+        }
+        .container { max-width: 1400px; }
+        .page-header {
+            margin-bottom: 30px;
+            border-bottom: 2px solid var(--accent-color);
+            padding-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .card { 
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); 
+            margin-bottom: 25px;
+            transition: transform 0.2s;
+        }
+        .card-header {
+            background-color: white;
+            border-bottom: 1px solid #eee;
+            font-weight: bold;
+            color: var(--primary-color);
+            padding: 15px 20px;
+            border-radius: 12px 12px 0 0 !important;
+        }
+        .table-container { 
+            background: white; 
+            border-radius: 12px; 
+            padding: 0; 
+            overflow: hidden;
+        }
+        .table { margin-bottom: 0; }
+        .table thead {
+            background-color: #f8f9fa;
+        }
+        .table th {
+            font-weight: 600;
+            color: #555;
+            border-top: none;
+            white-space: nowrap;
+        }
+        .loading { 
+            display: none; 
+            text-align: center; 
+            padding: 40px; 
+            background: white;
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+        .score-high { color: #e74c3c; font-weight: bold; }
+        .score-mid { color: #f39c12; font-weight: bold; }
+        .score-low { color: #95a5a6; }
+        
+        .badge-success { background-color: #2ecc71; }
+        .badge-danger { background-color: #e74c3c; }
+        
+        .sticky-table-header {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        .form-control:focus, .btn:focus {
+            box-shadow: 0 0 0 0.25rem rgba(52, 152, 219, 0.25);
+        }
+        
+        .btn-primary { background-color: var(--accent-color); border-color: var(--accent-color); }
+        .btn-primary:hover { background-color: #2980b9; border-color: #2980b9; }
+
+        /* 自定义表格滚动条 */
+        .table-responsive::-webkit-scrollbar {
+            height: 8px;
+        }
+        .table-responsive::-webkit-scrollbar-thumb {
+            background: #ccc;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="page-header">
+            <h2 class="m-0"><i class="bi bi-graph-up-arrow me-2"></i>实时候选股评分系统</h2>
+            <div class="text-muted small">策略版本: V1.0</div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-filter-square me-2"></i>计算参数配置
+            </div>
+            <div class="card-body p-4">
+                <form id="calcForm" class="row g-4">
+                    <div class="col-md-4">
+                        <label for="stockCode" class="form-label fw-bold">股票代码</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="bi bi-hash"></i></span>
+                            <input type="text" class="form-control" id="stockCode" placeholder="例如: 600000 (可选)">
+                        </div>
+                        <div class="form-text mt-2">留空则计算数据库中所有股票</div>
+                    </div>
+                    <div class="col-md-4">
+                        <label for="tradeDate" class="form-label fw-bold">交易日期</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="bi bi-calendar3"></i></span>
+                            <input type="date" class="form-control" id="tradeDate">
+                        </div>
+                        <div class="form-text mt-2">留空则自动遍历分时表中所有日期</div>
+                    </div>
+                    <div class="col-md-4 d-flex align-items-end">
+                        <button type="submit" class="btn btn-primary w-100 py-2 fw-bold" id="btnSubmit">
+                            <i class="bi bi-play-fill me-1"></i> 执行计算任务
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div id="loading" class="loading shadow-sm">
+            <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
+                <span class="visually-hidden">加载中...</span>
+            </div>
+            <h5 class="mt-3 text-secondary">计算任务处理中...</h5>
+            <p class="text-muted">这可能需要几十秒到几分钟，具体取决于数据量，请勿关闭窗口。</p>
+        </div>
+
+        <div id="resultArea" style="display: none;">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h4 class="m-0 text-dark"><i class="bi bi-list-check me-2"></i>计算结果集</h4>
+                <div class="btn-group">
+                    <button class="btn btn-outline-success btn-sm" onclick="exportToExcel()">
+                        <i class="bi bi-file-earmark-excel me-1"></i> 导出为 Excel
+                    </button>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="table-responsive">
+                    <table id="resultTable" class="table table-hover align-middle">
+                        <thead class="sticky-table-header">
+                            <tr>
+                                <th>交易日期</th>
+                                <th>代码</th>
+                                <th>简称</th>
+                                <th>板块/行业</th>
+                                <th>14:30价格</th>
+                                <th>尾盘动量</th>
+                                <th>日内位置</th>
+                                <th>短样本胜率</th>
+                                <th>总评分</th>
+                                <th>排名</th>
+                                <th>置信度</th>
+                                <th>状态</th>
+                            </tr>
+                        </thead>
+                        <tbody id="resultBody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 详情模态框 (可选) -->
+    <div class="modal fade" id="detailModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">评分明细 - <span id="detailStockName"></span></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="detailContent">
+                    <!-- 动态生成明细内容 -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.getElementById('calcForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const stockCode = document.getElementById('stockCode').value.trim();
+            const tradeDate = document.getElementById('tradeDate').value;
+            
+            const requestData = {
+                stockCode: stockCode || null,
+                tradeDate: tradeDate || null
+            };
+            
+            // UI 反馈
+            document.getElementById('btnSubmit').disabled = true;
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('resultArea').style.display = 'none';
+            document.getElementById('resultBody').innerHTML = '';
+
+            fetch('/anlysis/calculateCandidateScore', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestData)
+            })
+            .then(response => response.json())
+            .then(res => {
+                if (res.result === 1) {
+                    renderResults(res.data);
+                } else {
+                    showError('计算失败: ' + (res.msg || '未知错误'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showError('请求服务器时出错，请检查网络或后端日志。');
+            })
+            .finally(() => {
+                document.getElementById('btnSubmit').disabled = false;
+                document.getElementById('loading').style.display = 'none';
+            });
+        });
+
+        function showError(msg) {
+            alert(msg);
+        }
+
+        function renderResults(data) {
+            if (!data || data.length === 0) {
+                alert('未找到符合条件的数据或计算结果为空。');
+                return;
+            }
+            
+            const body = document.getElementById('resultBody');
+            data.forEach(item => {
+                const tr = document.createElement('tr');
+                
+                // 评分着色
+                let scoreClass = 'score-low';
+                if (item.finalScore >= 80) scoreClass = 'score-high';
+                else if (item.finalScore >= 60) scoreClass = 'score-mid';
+
+                // 置信度标签
+                let confBadge = 'bg-secondary';
+                if (item.confidenceLevel === 'HIGH') confBadge = 'bg-success';
+                else if (item.confidenceLevel === 'MEDIUM') confBadge = 'bg-info';
+
+                tr.innerHTML = `
+                    <td class="text-nowrap">${item.tradeDate}</td>
+                    <td class="fw-bold">${item.stockCode}</td>
+                    <td>${item.shortName || '-'}</td>
+                    <td><small class="text-muted">${item.sector || item.market || '-'}</small></td>
+                    <td>${item.price1430 ? item.price1430.toFixed(2) : '-'}</td>
+                    <td>${item.tailMomentum ? (item.tailMomentum * 100).toFixed(2) + '%' : '-'}</td>
+                    <td>${item.intradayPosition ? (item.intradayPosition * 100).toFixed(2) + '%' : '-'}</td>
+                    <td>${item.shortWinRate ? (item.shortWinRate * 100).toFixed(1) + '%' : '-'}</td>
+                    <td class="${scoreClass} fs-5">${item.finalScore ? item.finalScore.toFixed(1) : '-'}</td>
+                    <td><span class="badge bg-light text-dark border">${item.rankNo || '-'}</span></td>
+                    <td><span class="badge ${confBadge}">${item.confidenceLevel || '-'}</span></td>
+                    <td>
+                        ${item.validFlag 
+                            ? '<span class="badge badge-success"><i class="bi bi-check-circle me-1"></i>有效</span>' 
+                            : '<span class="badge badge-danger" data-bs-toggle="tooltip" title="'+(item.invalidReason||'数据不足')+'"><i class="bi bi-x-circle me-1"></i>无效</span>'}
+                    </td>
+                `;
+                body.appendChild(tr);
+            });
+            
+            // 初始化 Tooltips
+            const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+            tooltipTriggerList.map(function (tooltipTriggerEl) {
+                return new bootstrap.Tooltip(tooltipTriggerEl);
+            });
+
+            document.getElementById('resultArea').style.display = 'block';
+        }
+
+        function exportToExcel() {
+            const table = document.getElementById("resultTable");
+            const tradeDate = document.getElementById('tradeDate').value || 'All';
+            const fileName = `评分结果_${tradeDate}.xls`;
+            
+            const html = `
+                <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+                <head><meta charset="UTF-8"></head>
+                <body>${table.outerHTML}</body>
+                </html>
+            `;
+            
+            const blob = new Blob([html], { type: 'application/vnd.ms-excel' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = fileName;
+            link.click();
+            URL.revokeObjectURL(url);
+        }
+    </script>
+</body>
+</html>

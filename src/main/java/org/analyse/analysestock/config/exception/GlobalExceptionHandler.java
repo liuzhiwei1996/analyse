@@ -4,7 +4,8 @@ import com.alibaba.fastjson.JSON;
 import lombok.extern.slf4j.Slf4j;
 import org.analyse.analysestock.config.ResultData;
 import org.analyse.analysestock.config.ResultUtil;
-import org.analyse.analysestock.config.util.HttpPost;
+import org.analyse.analysestock.config.util.RestTemplateUtil;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.stereotype.Component;
 import org.springframework.validation.ObjectError;
@@ -28,6 +29,10 @@ import java.util.List;
 @Slf4j
 @Component
 public class GlobalExceptionHandler {
+
+    @Autowired
+    private RestTemplateUtil restTemplateUtil;
+
     /**
      * 如果发现新确定的类型的异常，但是这种异常又不需要人工去修复和改正的，可以把他捕捉然后参考 异常拦截2,3,4 的实现方式进行处理
      *
@@ -39,7 +44,7 @@ public class GlobalExceptionHandler {
     @ResponseBody
     public ResultData<CommonException> errorHander(HttpServletRequest request, Exception e) {
 
-        log.warn("请求地址 :{},方式:{},IP :{}, 参数 : {} URL信息:{}", request.getRequestURL(), request.getMethod(), HttpPost.getIpAddress(request), "", JSON.toJSONString(request.getParameterMap()));
+        log.warn("请求地址 :{},方式:{},IP :{}, 参数 : {} URL信息:{}", request.getRequestURL(), request.getMethod(), restTemplateUtil.getIpAddress(request), "", JSON.toJSONString(request.getParameterMap()));
         //自己抛出的异常
         if (e instanceof CommonException) {
             CommonException commonException = (CommonException) e;

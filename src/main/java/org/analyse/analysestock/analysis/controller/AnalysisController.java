@@ -6,11 +6,13 @@ import org.analyse.analysestock.analysis.serivce.ImportService;
 import org.analyse.analysestock.analysis.vo.StockInfoVo;
 import org.analyse.analysestock.config.ResultData;
 import org.analyse.analysestock.config.ResultUtil;
+import org.analyse.analysestock.realtimecandidate.dto.RealtimeCandidateScoreRecord;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
+import java.util.List;
 
 /**
  * @Author: keenan
@@ -48,5 +50,11 @@ public class AnalysisController implements AnalysisApi {
             stockInfoVo.setTradeDate(null);
         }
         return ResultUtil.success(importService.importStockDailyData(stockInfoVo.getStockCode(), stockInfoVo.getTradeDate()));
+    }
+
+    @Override
+    @PostMapping("/calculateCandidateScore")
+    public ResultData<List<RealtimeCandidateScoreRecord>> calculateCandidateScore(@RequestBody StockInfoVo stockInfoVo) {
+        return ResultUtil.success(importService.calculateRealtimeCandidateScores(stockInfoVo.getStockCode(), stockInfoVo.getTradeDate()));
     }
 }

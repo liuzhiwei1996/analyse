@@ -28,4 +28,7 @@ public interface AnalysisApi {
 
     @PostMapping("/importStockDailyData")
     ResultData<Integer> importStockDailyData(StockInfoVo stockInfoVo);
+
+    @PostMapping("/calculateCandidateScore")
+    ResultData<java.util.List<org.analyse.analysestock.realtimecandidate.dto.RealtimeCandidateScoreRecord>> calculateCandidateScore(StockInfoVo stockInfoVo);
 }

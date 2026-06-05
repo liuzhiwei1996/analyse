@@ -35,11 +35,6 @@ public class StockMinuteData {
     private BigDecimal price;
 
     /**
-     * 均价
-     */
-    private BigDecimal avgPrice;
-
-    /**
      * 分钟成交量
      */
     private Long minuteVolume;

@@ -23,4 +23,12 @@ public interface ImportService {
      * @return
      */
     Integer importStockDailyData(String stockCode, LocalDate tradeDate);
+
+    /**
+     * 计算实时候选股评分
+     * @param stockCode 股票代码 (可选)
+     * @param tradeDate 交易日期 (可选)
+     * @return 评分记录
+     */
+    java.util.List<org.analyse.analysestock.realtimecandidate.dto.RealtimeCandidateScoreRecord> calculateRealtimeCandidateScores(String stockCode, LocalDate tradeDate);
 }

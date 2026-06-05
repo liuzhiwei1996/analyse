@@ -8,7 +8,6 @@
             trade_date,
             time,
             price,
-            avg_price,
             minute_volume,
             minute_amount,
             high_price,
@@ -22,7 +21,6 @@
                 #{item.tradeDate},
                 #{item.time},
                 #{item.price},
-                #{item.avgPrice},
                 #{item.minuteVolume},
                 #{item.minuteAmount},
                 #{item.highPrice},
@@ -32,4 +30,7 @@
         </foreach>
     </insert>
 
+    <select id="findAllTradeDates" resultType="java.time.LocalDate">
+        SELECT DISTINCT trade_date FROM stock_minute_data ORDER BY trade_date DESC
+    </select>
 </mapper>

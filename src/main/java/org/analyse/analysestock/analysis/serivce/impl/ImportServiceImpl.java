@@ -5,6 +5,7 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.analyse.analysestock.analysis.entity.*;
 import org.analyse.analysestock.analysis.mapper.PubStockInfoMapper;
@@ -12,11 +13,16 @@ import org.analyse.analysestock.analysis.mapper.StockDataDailyAllMapper;
 import org.analyse.analysestock.analysis.mapper.StockMinuteDataMapper;
 import org.analyse.analysestock.analysis.mapper.TradingDateMapper;
 import org.analyse.analysestock.analysis.serivce.ImportService;
-import org.analyse.analysestock.config.util.HttpPost;
+import org.analyse.analysestock.config.util.RestTemplateUtil;
 import org.analyse.analysestock.config.util.StockCodeUtil;
+import org.analyse.analysestock.realtimecandidate.config.CostConfig;
+import org.analyse.analysestock.realtimecandidate.config.RealtimeStrategyConfig;
+import org.analyse.analysestock.realtimecandidate.dto.RealtimeCandidateScoreRecord;
+import org.analyse.analysestock.realtimecandidate.engine.RealtimeCandidateScoreEngine;
 import org.analyse.analysestock.util.ListUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
@@ -28,8 +34,12 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
@@ -53,6 +63,13 @@ public class ImportServiceImpl implements ImportService {
     @Autowired
     private TradingDateMapper tradingDateMapper;
 
+    @Autowired
+    private RestTemplateUtil restTemplateUtil;
+
+    @Autowired
+    @Qualifier("importExecutor")
+    private Executor importExecutor;
+
     private static final String MINUTE_URL = "http://10.0.11.15:5757/BQreal/rds/RDS.do?pkgtype=MinuteKLine&code=%s&min=1&end=%s&count=240";
 
 
@@ -60,7 +77,7 @@ public class ImportServiceImpl implements ImportService {
     private String rdsUrl;
 
     @Override
-    public Integer importStockMinuteData(String code, LocalDate date) {
+    public Integer  importStockMinuteData(String code, LocalDate date) {
 
         List<LocalDate> tradeDates = new ArrayList<>();
         if (date != null) {
@@ -74,82 +91,101 @@ public class ImportServiceImpl implements ImportService {
             log.info("没有找到股票信息");
             return 0;
         }
+
+        if (stockInfos.size() > 1) {
+            return importStockMinuteDataParallel(stockInfos, tradeDates);
+        }
+
         int totalImported = 0;
         for (PubStockInfo stockInfo : stockInfos) {
-            String symbol = stockInfo.getSymbol();
-            for (LocalDate tradeDate : tradeDates) {
-                String dateStr = tradeDate.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
-                try {
-                    String apiSymbol = StockCodeUtil.addMarketPrefix(symbol);
-                    String stockCode = apiSymbol.substring(1);
-                    // 2. 查询该股票当天已有的最大时间
-                    LambdaQueryWrapper<StockMinuteData> queryWrapper = new LambdaQueryWrapper<>();
-                    queryWrapper.eq(StockMinuteData::getStockCode, Integer.valueOf(stockCode))
-                            .eq(StockMinuteData::getTradeDate, tradeDate)
-                            .orderByDesc(StockMinuteData::getTime)
-                            .last("limit 1");
-                    StockMinuteData lastData = stockMinuteDataMapper.selectOne(queryWrapper);
-                    int lastTime = lastData == null ? 0 : lastData.getTime();
-
-                    // 3. 构造 URL 并请求数据
-                    String url = String.format(MINUTE_URL, apiSymbol, dateStr);
-                    String response = HttpPost.sendGet(url);
-                    if (response == null) {
-                        continue;
-                    }
-
-                    JSONObject jsonObject = JSON.parseObject(response);
-                    if (jsonObject == null || !"1".equals(jsonObject.getString("result"))) {
-                        continue;
-                    }
-
-                    JSONObject dataObj = jsonObject.getJSONObject("data");
-                    if (dataObj == null) continue;
-                    JSONArray list = dataObj.getJSONArray("list");
-                    if (list == null || list.isEmpty()) continue;
-
-                    List<StockMinuteData> toSave = new ArrayList<>();
-                    for (int i = 0; i < list.size(); i++) {
-                        JSONArray item = list.getJSONArray(i);
-                        // [日期, 时间, 开盘, 最高, 最低, 收盘, 成交量, 成交额]
-                        // 对应示例：20160308, 945, 3.9, 3.96, 3.6, 3.7, 597980, 2498541
-                        LocalDate rdsDate = LocalDate.parse(item.getString(0), DateTimeFormatter.ofPattern("yyyyMMdd"));
-                        if (!rdsDate.equals(tradeDate)) {
-                            continue;
-                        }
-                        int time = item.getInteger(1);
-                        if (time <= lastTime) {
-                            continue;
-                        }
-                        StockMinuteData data = new StockMinuteData();
-                        data.setStockCode(Integer.valueOf(stockCode));
-                        data.setTradeDate(rdsDate);
-                        data.setTime(time);
-                        data.setAvgPrice(item.getBigDecimal(2));
-                        data.setPrice(item.getBigDecimal(5)); // 收盘价作为当前分钟价格
-                        data.setHighPrice(item.getBigDecimal(3));
-                        data.setLowPrice(item.getBigDecimal(4));
-                        data.setMinuteVolume(item.getLong(6));
-                        data.setMinuteAmount(item.getBigDecimal(7));
-                        // avgPrice 暂时用价格或者需要计算？通常分时图中 avgPrice 是当天成交总额/成交总量。
-                        // 这里如果是单分钟数据，可能需要累加逻辑，暂时设为 null 或 收盘价。
-                        data.setCreateTime(LocalDateTime.now());
-
-                        toSave.add(data);
-                    }
-
-                    if (!toSave.isEmpty()) {
-                        stockMinuteDataMapper.insertBatch(toSave);
-                        totalImported += toSave.size();
-                        log.info("股票 {} 导入了 {} 条分钟数据", symbol, toSave.size());
-                    }
-                } catch (Exception e) {
-                    log.error("导入股票 {} 分时数据异常", symbol, e);
-                }
-
-            }
+            totalImported += importSingleStockMinuteData(stockInfo, tradeDates);
         }
         return totalImported;
+    }
+
+    private int importStockMinuteDataParallel(List<PubStockInfo> stockInfos, List<LocalDate> tradeDates) {
+        AtomicInteger totalImported = new AtomicInteger(0);
+        List<CompletableFuture<Void>> futures = stockInfos.stream()
+                .map(stockInfo -> CompletableFuture.runAsync(() -> {
+                    totalImported.addAndGet(importSingleStockMinuteData(stockInfo, tradeDates));
+                }, importExecutor))
+                .collect(Collectors.toList());
+
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        return totalImported.get();
+    }
+
+    private int importSingleStockMinuteData(PubStockInfo stockInfo, List<LocalDate> tradeDates) {
+        int importedCount = 0;
+        String symbol = stockInfo.getSymbol();
+        for (LocalDate tradeDate : tradeDates) {
+            String dateStr = tradeDate.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+            try {
+                String apiSymbol = StockCodeUtil.addMarketPrefix(symbol);
+                String stockCode = apiSymbol.substring(1);
+                // 2. 查询该股票当天已有的最大时间
+                LambdaQueryWrapper<StockMinuteData> queryWrapper = new LambdaQueryWrapper<>();
+                queryWrapper.eq(StockMinuteData::getStockCode, Integer.valueOf(stockCode))
+                        .eq(StockMinuteData::getTradeDate, tradeDate)
+                        .orderByDesc(StockMinuteData::getTime)
+                        .last("limit 1");
+                StockMinuteData lastData = stockMinuteDataMapper.selectOne(queryWrapper);
+                int lastTime = lastData == null ? 0 : lastData.getTime();
+
+                // 3. 构造 URL 并请求数据
+                String url = String.format(MINUTE_URL, apiSymbol, dateStr);
+                String response = restTemplateUtil.getForObject(url, "分时数据导入", 0);
+                if (response == null) {
+                    continue;
+                }
+
+                JSONObject jsonObject = JSON.parseObject(response);
+                if (jsonObject == null || !"1".equals(jsonObject.getString("result"))) {
+                    continue;
+                }
+
+                JSONObject dataObj = jsonObject.getJSONObject("data");
+                if (dataObj == null) continue;
+                JSONArray list = dataObj.getJSONArray("list");
+                if (list == null || list.isEmpty()) continue;
+
+                List<StockMinuteData> toSave = new ArrayList<>();
+                for (int i = 0; i < list.size(); i++) {
+                    JSONArray item = list.getJSONArray(i);
+                    // [日期, 时间, 开盘, 最高, 最低, 收盘, 成交量, 成交额]
+                    // 对应示例：20160308, 945, 3.9, 3.96, 3.6, 3.7, 597980, 2498541
+                    LocalDate rdsDate = LocalDate.parse(item.getString(0), DateTimeFormatter.ofPattern("yyyyMMdd"));
+                    if (!rdsDate.equals(tradeDate)) {
+                        continue;
+                    }
+                    int time = item.getInteger(1);
+                    if (time <= lastTime) {
+                        continue;
+                    }
+                    StockMinuteData data = new StockMinuteData();
+                    data.setStockCode(Integer.valueOf(stockCode));
+                    data.setTradeDate(rdsDate);
+                    data.setTime(time);
+                    data.setPrice(item.getBigDecimal(5)); // 收盘价作为当前分钟价格
+                    data.setHighPrice(item.getBigDecimal(3));
+                    data.setLowPrice(item.getBigDecimal(4));
+                    data.setMinuteVolume(item.getLong(6));
+                    data.setMinuteAmount(item.getBigDecimal(7));
+                    data.setCreateTime(LocalDateTime.now());
+
+                    toSave.add(data);
+                }
+
+                if (!toSave.isEmpty()) {
+                    stockMinuteDataMapper.insertBatch(toSave);
+                    importedCount += toSave.size();
+                    log.info("股票 {} 导入了 {} 条分钟数据", symbol, toSave.size());
+                }
+            } catch (Exception e) {
+                log.error("导入股票 {} 分时数据异常", symbol, e);
+            }
+        }
+        return importedCount;
     }
 
     @Override
@@ -164,12 +200,33 @@ public class ImportServiceImpl implements ImportService {
             log.info("没有找到股票信息");
             return 0;
         }
+
+        if (stockInfos.size() > 1) {
+            return importStockDailyDataParallel(stockInfos, dateStr);
+        }
+
         int totalImported = 0;
         for (PubStockInfo stockInfo : stockInfos) {
-            String symbol = stockInfo.getSymbol();
-            addStockDataDailyAll(symbol, dateStr);
+            totalImported += importSingleStockDailyData(stockInfo, dateStr);
         }
         return totalImported;
+    }
+
+    private int importStockDailyDataParallel(List<PubStockInfo> stockInfos, String dateStr) {
+        AtomicInteger totalImported = new AtomicInteger(0);
+        List<CompletableFuture<Void>> futures = stockInfos.stream()
+                .map(stockInfo -> CompletableFuture.runAsync(() -> {
+                    totalImported.addAndGet(importSingleStockDailyData(stockInfo, dateStr));
+                }, importExecutor))
+                .collect(Collectors.toList());
+
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        return totalImported.get();
+    }
+
+    private int importSingleStockDailyData(PubStockInfo stockInfo, String dateStr) {
+        String symbol = stockInfo.getSymbol();
+        return addStockDataDailyAll(symbol, dateStr);
     }
 
     public int addStockDataDailyAll(String stockCode, String dateStr) {
@@ -242,7 +299,7 @@ public class ImportServiceImpl implements ImportService {
             }
         }
         String url = rdsUrl + "?pkgtype=hiskline&code=" + stockCode + "&count=" + count + "&start=" + start + "&end=" + end + "&power=" + power;
-        String str = HttpPost.sendGet(url);
+        String str = restTemplateUtil.getForObject(url, "日K数据导入", 0);
         if (CharSequenceUtil.isNotBlank(str)) {
             JSONArray jsonArray = JSON.parseObject(str).getJSONObject("data").getJSONArray("day");
             if (!jsonArray.isEmpty()) {
@@ -374,5 +431,89 @@ public class ImportServiceImpl implements ImportService {
         return null;
     }
 
+    private final RealtimeCandidateScoreEngine scoreEngine = new RealtimeCandidateScoreEngine();
 
+    @Override
+    public List<RealtimeCandidateScoreRecord> calculateRealtimeCandidateScores(String stockCode, LocalDate tradeDate) {
+        List<LocalDate> targetDates = new ArrayList<>();
+        if (tradeDate != null) {
+            targetDates.add(tradeDate);
+        } else {
+            targetDates = stockMinuteDataMapper.findAllTradeDates();
+            if (CollectionUtils.isEmpty(targetDates)) {
+                log.warn("未找到任何交易日期记录");
+                return Collections.emptyList();
+            }
+        }
+
+        List<RealtimeCandidateScoreRecord> allResults = new ArrayList<>();
+        for (LocalDate date : targetDates) {
+            allResults.addAll(calculateForSingleDate(stockCode, date));
+        }
+        return allResults;
+    }
+
+    private List<RealtimeCandidateScoreRecord> calculateForSingleDate(String stockCode, LocalDate tradeDate) {
+        log.info("开始计算股票 {} 在 {} 的实时候选股评分", stockCode == null ? "ALL" : stockCode, tradeDate);
+
+        // 1. 获取基础信息
+        QueryWrapper<PubStockInfo> stockInfoQuery = new QueryWrapper<>();
+        if (stockCode != null) {
+            stockInfoQuery.eq("symbol", stockCode);
+        }
+        List<PubStockInfo> stockInfos = pubStockInfoMapper.selectList(stockInfoQuery);
+        if (CollectionUtils.isEmpty(stockInfos)) {
+            log.warn("未找到对应的股票基础信息: {}", stockCode);
+            return Collections.emptyList();
+        }
+
+        // 2. 获取分钟线的日期窗口 (最近21个交易日，相对于当前计算的 tradeDate)
+        // 注意：findByMinuteTradeDate() 目前可能是固定逻辑，可能需要传入 tradeDate
+        // 但根据现有逻辑，它返回的是库里最近的21天。
+        // 如果是回测所有历史交易日，findByMinuteTradeDate 可能需要调整。
+        List<LocalDate> minuteDates = tradingDateMapper.findByMinuteTradeDate();
+        if (CollectionUtils.isEmpty(minuteDates)) {
+            log.warn("未找到分钟线交易日期");
+            return Collections.emptyList();
+        }
+
+        // 3. 获取分钟线数据
+        QueryWrapper<StockMinuteData> minuteQuery = new QueryWrapper<>();
+        minuteQuery.in("trade_date", minuteDates);
+        if (stockCode != null) {
+            // 注意：StockMinuteData.stockCode 是 Integer 还是 String? 
+            // 实体类中是 Integer.
+            try {
+                minuteQuery.eq("stock_code", Integer.parseInt(stockCode));
+            } catch (NumberFormatException e) {
+                log.error("股票代码格式错误: {}", stockCode);
+            }
+        }
+        List<StockMinuteData> minuteBars = stockMinuteDataMapper.selectList(minuteQuery);
+
+        // 4. 获取日K数据
+        QueryWrapper<StockDataDailyAll> dailyQuery = new QueryWrapper<>();
+        dailyQuery.ge("trade_date", tradeDate.minusYears(1));
+        dailyQuery.le("trade_date", tradeDate);
+        if (stockCode != null) {
+            dailyQuery.eq("stock_code", stockCode);
+        }
+        List<StockDataDailyAll> dailyBars = stockDataDailyAllMapper.selectList(dailyQuery);
+
+        // 5. 执行计算
+        RealtimeStrategyConfig strategyConfig = new RealtimeStrategyConfig();
+        CostConfig costConfig = new CostConfig();
+
+        List<RealtimeCandidateScoreRecord> results = scoreEngine.calculateWithEntities(
+                tradeDate,
+                dailyBars,
+                minuteBars,
+                stockInfos,
+                strategyConfig,
+                costConfig
+        );
+
+        log.info("日期 {} 计算完成，共生成 {} 条评分记录", tradeDate, results.size());
+        return results;
+    }
 }
