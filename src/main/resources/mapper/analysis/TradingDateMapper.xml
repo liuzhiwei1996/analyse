@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.analyse.analysestock.analysis.mapper.TradingDateMapper">
+
+    <select id="getNewsetTradingDate" resultType="java.time.LocalDate">
+        SELECT trading_date
+        FROM trading_date
+        WHERE market = #{market}
+          AND trading_date
+            &lt;= #{holdingDate}
+        ORDER BY trading_date DESC LIMIT 1
+    </select>
+
+
+    <select id="findTradingDateSqlServerStockCode" resultType="java.time.LocalDate">
+        SELECT trading_date
+        FROM trading_date
+        WHERE market = #{market}
+          AND trading_date
+            > #{holdingDate}
+        ORDER BY trading_date ASC
+            LIMIT #{num}, 1
+    </select>
+
+    <select id="isTradeDate" resultType="java.lang.Integer">
+        select count(*)
+        from trading_date
+        where trading_date = #{tradeDate}
+    </select>
+    <select id="findByMinuteTradeDate" resultType="java.time.LocalDate">
+        SELECT trading_date
+        FROM trading_date
+        WHERE trading_date &lt;=
+              (SELECT trading_date FROM trading_date WHERE trading_date &lt;= now() ORDER BY trading_date DESC LIMIT 1 )
+        ORDER BY
+            trading_date DESC
+            LIMIT 21
+    </select>
+</mapper>
+

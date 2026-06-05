@@ -2,4 +2,15 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="org.analyse.analysestock.analysis.mapper.PubStockInfoMapper">
 
+    <select id="findIpoDateByStockCode" resultType="java.time.LocalDate">
+        select listing_date from pub_stock_info where symbol = #{stockCode}
+    </select>
+    <select id="findByStockCode" resultType="org.analyse.analysestock.analysis.entity.PubStockInfo">
+        select * from pub_stock_info
+        <where>
+            <if test="stockCode != null">
+                symbol = #{stockCode}
+            </if>
+        </where>
+    </select>
 </mapper>

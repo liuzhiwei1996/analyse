@@ -2,4 +2,34 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="org.analyse.analysestock.analysis.mapper.StockMinuteDataMapper">
 
+    <insert id="insertBatch">
+        INSERT INTO stock_minute_data (
+            stock_code,
+            trade_date,
+            time,
+            price,
+            avg_price,
+            minute_volume,
+            minute_amount,
+            high_price,
+            low_price,
+            create_time
+        )
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+                #{item.stockCode},
+                #{item.tradeDate},
+                #{item.time},
+                #{item.price},
+                #{item.avgPrice},
+                #{item.minuteVolume},
+                #{item.minuteAmount},
+                #{item.highPrice},
+                #{item.lowPrice},
+                #{item.createTime}
+            )
+        </foreach>
+    </insert>
+
 </mapper>

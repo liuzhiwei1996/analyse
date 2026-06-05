@@ -14,10 +14,14 @@ import java.time.LocalDateTime;
  */
 @Data
 @TableName("stock_data_daily_all")
-public class StockDataDailyAll {
+public class StockDataDailyAll  extends AbstractStockDataDaily{
+
+    private static final long serialVersionUID = 1L;
+
 
     @TableId(type = IdType.AUTO)
     private Long id;
+
 
     /**
      * 股票代码
@@ -32,47 +36,48 @@ public class StockDataDailyAll {
     /**
      * 开盘价
      */
-    private BigDecimal open;
+    private BigDecimal open = BigDecimal.ZERO;
 
     /**
      * 最高价
      */
-    private BigDecimal highest;
+    private BigDecimal highest = BigDecimal.ZERO;
 
     /**
      * 最低价
      */
-    private BigDecimal lowest;
+    private BigDecimal lowest = BigDecimal.ZERO;
 
     /**
      * 收盘价
      */
-    private BigDecimal close;
+    private BigDecimal close = BigDecimal.ZERO;
 
     /**
-     * 前复权_收盘价
+     * 前复权收盘价
      */
-    private BigDecimal closeForead;
+    private BigDecimal closeForead = BigDecimal.ZERO;
 
     /**
-     * 后复权_收盘价
+     * 后复权收盘价
      */
-    private BigDecimal closeBackad;
+    private BigDecimal closeBackad = BigDecimal.ZERO;
 
     /**
      * 成交额
      */
-    private BigDecimal amount;
+    private BigDecimal amount = BigDecimal.ZERO;
 
     /**
      * 昨收价
      */
-    private BigDecimal closePrevious;
+    private BigDecimal closePrevious = BigDecimal.ZERO;
 
     /**
      * 成交量
      */
-    private Long volume;
+    private Long volume = 0L;
+
 
     /**
      * 是否删除：0否1是

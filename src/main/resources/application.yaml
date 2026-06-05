@@ -17,3 +17,9 @@ spring:
           driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
+constant:
+  url:
+    rds: http://10.0.11.15:5757/BQreal/rds/RDS.do
+logging:
+  level:
+   org.analyse.analysestock.config.util.HttpPost: debug
