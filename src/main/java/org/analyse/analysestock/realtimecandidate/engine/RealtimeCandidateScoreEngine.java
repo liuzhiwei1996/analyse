@@ -9,8 +9,12 @@ import org.analyse.analysestock.realtimecandidate.config.CostConfig;
 import org.analyse.analysestock.realtimecandidate.config.RealtimeStrategyConfig;
 import org.analyse.analysestock.realtimecandidate.dto.*;
 import org.analyse.analysestock.realtimecandidate.enums.ConfidenceLevel;
+import org.analyse.analysestock.realtimecandidate.enums.DataQualityFlag;
 import org.analyse.analysestock.realtimecandidate.enums.InvalidReason;
 import org.analyse.analysestock.realtimecandidate.util.PercentileUtils;
+import org.springframework.util.CollectionUtils;
+
+import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -18,6 +22,7 @@ import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
 
+@Service
 @Slf4j
 public class RealtimeCandidateScoreEngine {
 
@@ -80,6 +85,118 @@ public class RealtimeCandidateScoreEngine {
         }).collect(Collectors.toList());
 
         return calculateWithEntities(tradeDate, dailyBars, minuteBars, securityInfos, strategyConfig, costConfig);
+    }
+
+    public List<RealtimeCandidateScoreRecord> calculateWithSnapshots(
+            LocalDate tradeDate,
+            List<RealtimeFactorSnapshot> factorSnapshots,
+            RealtimeStrategyConfig strategyConfig,
+            CostConfig costConfig
+    ) {
+        if (CollectionUtils.isEmpty(factorSnapshots)) {
+            return Collections.emptyList();
+        }
+
+        // 1. 横截面标准化
+        List<BigDecimal> tmList = factorSnapshots.stream().map(RealtimeFactorSnapshot::getTailMomentum).collect(Collectors.toList());
+        List<BigDecimal> tmRanks = PercentileUtils.calculatePercentileRanks(tmList);
+
+        List<BigDecimal> tvrList = factorSnapshots.stream().map(RealtimeFactorSnapshot::getTailAmount14001430).collect(Collectors.toList());
+        List<BigDecimal> tvrRanks = PercentileUtils.calculatePercentileRanks(tvrList);
+
+        List<BigDecimal> volList = factorSnapshots.stream().map(RealtimeFactorSnapshot::getVolatility20d).collect(Collectors.toList());
+        List<BigDecimal> volRanks = PercentileUtils.calculatePercentileRanks(volList);
+
+        for (int i = 0; i < factorSnapshots.size(); i++) {
+            RealtimeFactorSnapshot s = factorSnapshots.get(i);
+            s.setTailMomentumScore(tmRanks.get(i));
+            s.setTailVolumeScore(tvrRanks.get(i));
+            if (volRanks.get(i) != null) {
+                s.setVolatilityScore(BigDecimal.ONE.subtract(volRanks.get(i)));
+            }
+        }
+
+        // 2. 最终评分计算
+        List<RealtimeCandidateScoreRecord> records = new ArrayList<>();
+        for (RealtimeFactorSnapshot s : factorSnapshots) {
+            // 这里可以复用 ScoreCalculator，或者根据新结构重构
+            // 为了保持简单，先直接根据权重计算
+            BigDecimal finalScore = calculateFinalScore(s, strategyConfig);
+
+            RealtimeCandidateScoreRecord record = new RealtimeCandidateScoreRecord();
+            record.setTradeDate(tradeDate);
+            record.setStockCode(s.getStockCode());
+            record.setShortName(s.getShortName());
+            record.setMarket(s.getMarket());
+            record.setSector(s.getSector());
+
+            record.setPrice1400(s.getPrice1400());
+            record.setPrice1430(s.getPrice1430());
+            record.setBuyRefPrice1430(s.getPrice1430());
+            record.setTailMomentum(s.getTailMomentum());
+            record.setTailAmount1400To1430(s.getTailAmount14001430());
+            record.setTailVolumeRatio(s.getTailVolumeRatio());
+            record.setIntradayPosition(s.getIntradayPosition());
+            record.setReturnTo1430(s.getReturnTo1430());
+            record.setRelativeStrength(s.getRelativeStrength());
+            record.setReturn5d(s.getReturn5d());
+            record.setReturn20d(s.getReturn20d());
+            record.setVolatility20d(s.getVolatility20d());
+            record.setAvgAmount20d(s.getAvgAmount20d());
+
+            record.setMarketBreadth(s.getMarketBreadth1430());
+            record.setMarketReturn1430(s.getMarketReturn1430());
+            record.setSectorStrength(s.getSectorStrength1430());
+            record.setSectorBreadth(s.getSectorBreadth1430());
+
+            record.setShortSampleCount(s.getShortSampleCount() != null ? s.getShortSampleCount() : 0);
+            record.setShortWinRate(s.getShortWinRate());
+            record.setShortAvgNetReturnBps(s.getShortAvgNetReturnBps());
+
+            record.setTailMomentumScore(s.getTailMomentumScore());
+            record.setTailVolumeScore(s.getTailVolumeScore());
+            record.setIntradayPositionScore(s.getIntradayPositionScore());
+            record.setDailyTrendScore(s.getDailyTrendScore());
+            record.setVolatilityScore(s.getVolatilityScore());
+            record.setRegimeScore(s.getRegimeScore());
+            record.setShortSampleScore(s.getShortSampleScore());
+
+            record.setFinalScore(finalScore != null ? finalScore : BigDecimal.ZERO);
+            record.setValidFlag(true);
+            record.setDataQualityFlag(s.getDataQualityFlag() != null ? s.getDataQualityFlag() : DataQualityFlag.NORMAL);
+
+            records.add(record);
+        }
+
+        // 3. 排序
+        records.sort((r1, r2) -> {
+            BigDecimal s1 = r1.getFinalScore() != null ? r1.getFinalScore() : BigDecimal.ZERO;
+            BigDecimal s2 = r2.getFinalScore() != null ? r2.getFinalScore() : BigDecimal.ZERO;
+            int cmp = s2.compareTo(s1); // 降序
+            if (cmp != 0) return cmp;
+            
+            String c1 = r1.getStockCode() != null ? r1.getStockCode() : "";
+            String c2 = r2.getStockCode() != null ? r2.getStockCode() : "";
+            return c1.compareTo(c2);
+        });
+
+        for (int i = 0; i < records.size(); i++) {
+            records.get(i).setRankNo(i + 1);
+        }
+
+        return records;
+    }
+
+    private BigDecimal calculateFinalScore(RealtimeFactorSnapshot s, RealtimeStrategyConfig config) {
+        // 简化的权重计算逻辑
+        BigDecimal score = BigDecimal.ZERO;
+        if (s.getTailMomentumScore() != null) score = score.add(s.getTailMomentumScore().multiply(new BigDecimal("0.3")));
+        if (s.getTailVolumeScore() != null) score = score.add(s.getTailVolumeScore().multiply(new BigDecimal("0.2")));
+        if (s.getIntradayPositionScore() != null) score = score.add(s.getIntradayPositionScore().multiply(new BigDecimal("0.1")));
+        if (s.getDailyTrendScore() != null) score = score.add(s.getDailyTrendScore().multiply(new BigDecimal("0.1")));
+        if (s.getVolatilityScore() != null) score = score.add(s.getVolatilityScore().multiply(new BigDecimal("0.1")));
+        if (s.getShortSampleScore() != null) score = score.add(s.getShortSampleScore().multiply(new BigDecimal("0.2")));
+        return score.setScale(4, RoundingMode.HALF_UP);
     }
 
     public List<RealtimeCandidateScoreRecord> calculateWithEntities(

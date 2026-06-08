@@ -28,6 +28,12 @@
                 #{item.createTime}
             )
         </foreach>
+        ON DUPLICATE KEY UPDATE
+            price = VALUES(price),
+            minute_volume = VALUES(minute_volume),
+            minute_amount = VALUES(minute_amount),
+            high_price = VALUES(high_price),
+            low_price = VALUES(low_price)
     </insert>
 
     <select id="findAllTradeDates" resultType="java.time.LocalDate">

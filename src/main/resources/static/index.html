@@ -86,6 +86,13 @@
         .btn-primary { background-color: var(--accent-color); border-color: var(--accent-color); }
         .btn-primary:hover { background-color: #2980b9; border-color: #2980b9; }
 
+        .result-toolbar {
+            gap: 10px;
+        }
+        .result-search {
+            width: min(320px, 100%);
+        }
+
         /* 自定义表格滚动条 */
         .table-responsive::-webkit-scrollbar {
             height: 8px;
@@ -93,6 +100,13 @@
         .table-responsive::-webkit-scrollbar-thumb {
             background: #ccc;
             border-radius: 4px;
+        }
+
+        @media (max-width: 768px) {
+            .result-toolbar,
+            .result-search {
+                width: 100%;
+            }
         }
     </style>
 </head>
@@ -109,25 +123,30 @@
             </div>
             <div class="card-body p-4">
                 <form id="calcForm" class="row g-4">
-                    <div class="col-md-4">
+                    <div class="col-md-3">
                         <label for="stockCode" class="form-label fw-bold">股票代码</label>
                         <div class="input-group">
                             <span class="input-group-text"><i class="bi bi-hash"></i></span>
                             <input type="text" class="form-control" id="stockCode" placeholder="例如: 600000 (可选)">
                         </div>
-                        <div class="form-text mt-2">留空则计算数据库中所有股票</div>
+                        <div class="form-text mt-2">留空则计算所有股票</div>
                     </div>
-                    <div class="col-md-4">
+                    <div class="col-md-3">
                         <label for="tradeDate" class="form-label fw-bold">交易日期</label>
                         <div class="input-group">
                             <span class="input-group-text"><i class="bi bi-calendar3"></i></span>
                             <input type="date" class="form-control" id="tradeDate">
                         </div>
-                        <div class="form-text mt-2">留空则自动遍历分时表中所有日期</div>
+                        <div class="form-text mt-2">留空则默认当日</div>
                     </div>
-                    <div class="col-md-4 d-flex align-items-end">
+                    <div class="col-md-3 d-flex align-items-end">
+                        <button type="button" class="btn btn-outline-primary w-100 py-2 fw-bold" id="btnPrepare">
+                            <i class="bi bi-layers-half me-1"></i> 生成因子快照
+                        </button>
+                    </div>
+                    <div class="col-md-3 d-flex align-items-end">
                         <button type="submit" class="btn btn-primary w-100 py-2 fw-bold" id="btnSubmit">
-                            <i class="bi bi-play-fill me-1"></i> 执行计算任务
+                            <i class="bi bi-play-fill me-1"></i> 执行计算评分
                         </button>
                     </div>
                 </form>
@@ -143,9 +162,17 @@
         </div>
 
         <div id="resultArea" style="display: none;">
-            <div class="d-flex justify-content-between align-items-center mb-3">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
                 <h4 class="m-0 text-dark"><i class="bi bi-list-check me-2"></i>计算结果集</h4>
-                <div class="btn-group">
+                <div class="d-flex flex-wrap align-items-center result-toolbar">
+                    <div class="input-group input-group-sm result-search">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" class="form-control" id="resultSearchInput" placeholder="按股票代码或简称搜索">
+                        <button class="btn btn-outline-secondary" type="button" id="clearResultSearch" title="清空搜索">
+                            <i class="bi bi-x-lg"></i>
+                        </button>
+                    </div>
+                    <span class="text-muted small" id="resultCount">共 0 条</span>
                     <button class="btn btn-outline-success btn-sm" onclick="exportToExcel()">
                         <i class="bi bi-file-earmark-excel me-1"></i> 导出为 Excel
                     </button>
@@ -196,6 +223,39 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        let currentResults = [];
+        let currentKeyword = '';
+
+        document.getElementById('btnPrepare').addEventListener('click', function() {
+            const tradeDate = document.getElementById('tradeDate').value;
+            const btn = document.getElementById('btnPrepare');
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 生成中...';
+
+            fetch('/anlysis/prepareSnapshots', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tradeDate: tradeDate || null })
+            })
+            .then(response => response.json())
+            .then(res => {
+                if (res.result === 1 || res.code === 200) {
+                    alert('因子快照生成成功！');
+                } else {
+                    alert('生成失败: ' + (res.msg || res.message || '未知错误'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('请求失败，请检查网络。');
+            })
+            .finally(() => {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-layers-half me-1"></i> 生成因子快照';
+            });
+        });
+
         document.getElementById('calcForm').addEventListener('submit', function(e) {
             e.preventDefault();
             
@@ -212,6 +272,10 @@
             document.getElementById('loading').style.display = 'block';
             document.getElementById('resultArea').style.display = 'none';
             document.getElementById('resultBody').innerHTML = '';
+            currentResults = [];
+            currentKeyword = '';
+            document.getElementById('resultSearchInput').value = '';
+            updateResultCount(0);
 
             fetch('/anlysis/calculateCandidateScore', {
                 method: 'POST',
@@ -242,13 +306,56 @@
             alert(msg);
         }
 
+        function formatFinalScore(value) {
+            if (value === null || value === undefined || value === '') {
+                return '-';
+            }
+
+            const rawValue = String(value).trim();
+            const numericValue = Number(rawValue);
+            if (!rawValue || !Number.isFinite(numericValue)) {
+                return '-';
+            }
+
+            const normalizedValue = /e/i.test(rawValue) ? numericValue.toFixed(20) : rawValue;
+            const [integerPart, decimalPart = ''] = normalizedValue.split('.');
+            return `${integerPart}.${decimalPart.padEnd(4, '0').slice(0, 4)}`;
+        }
+
+        document.getElementById('resultSearchInput').addEventListener('input', function() {
+            currentKeyword = this.value.trim();
+            renderResultRows(filterResults(currentResults, currentKeyword));
+        });
+
+        document.getElementById('clearResultSearch').addEventListener('click', function() {
+            document.getElementById('resultSearchInput').value = '';
+            currentKeyword = '';
+            renderResultRows(currentResults);
+        });
+
         function renderResults(data) {
             if (!data || data.length === 0) {
                 alert('未找到符合条件的数据或计算结果为空。');
                 return;
             }
-            
+
+            currentResults = data;
+            currentKeyword = '';
+            document.getElementById('resultSearchInput').value = '';
+            renderResultRows(currentResults);
+            document.getElementById('resultArea').style.display = 'block';
+        }
+
+        function renderResultRows(data) {
             const body = document.getElementById('resultBody');
+            body.innerHTML = '';
+
+            if (!data || data.length === 0) {
+                body.innerHTML = '<tr><td colspan="12" class="text-center text-muted py-4">未匹配到股票代码或简称</td></tr>';
+                updateResultCount(0);
+                return;
+            }
+
             data.forEach(item => {
                 const tr = document.createElement('tr');
                 
@@ -271,7 +378,7 @@
                     <td>${item.tailMomentum ? (item.tailMomentum * 100).toFixed(2) + '%' : '-'}</td>
                     <td>${item.intradayPosition ? (item.intradayPosition * 100).toFixed(2) + '%' : '-'}</td>
                     <td>${item.shortWinRate ? (item.shortWinRate * 100).toFixed(1) + '%' : '-'}</td>
-                    <td class="${scoreClass} fs-5">${item.finalScore ? item.finalScore.toFixed(1) : '-'}</td>
+                    <td class="${scoreClass} fs-5">${formatFinalScore(item.finalScore)}</td>
                     <td><span class="badge bg-light text-dark border">${item.rankNo || '-'}</span></td>
                     <td><span class="badge ${confBadge}">${item.confidenceLevel || '-'}</span></td>
                     <td>
@@ -289,7 +396,31 @@
                 return new bootstrap.Tooltip(tooltipTriggerEl);
             });
 
-            document.getElementById('resultArea').style.display = 'block';
+            updateResultCount(data.length);
+        }
+
+        function filterResults(data, keyword) {
+            const normalizedKeyword = keyword.toLowerCase();
+            if (!normalizedKeyword) {
+                return data;
+            }
+
+            return data.filter(item => {
+                const stockCode = String(item.stockCode || '').toLowerCase();
+                const shortName = String(item.shortName || '').toLowerCase();
+                const stockName = String(item.stockName || '').toLowerCase();
+                return stockCode.includes(normalizedKeyword)
+                    || shortName.includes(normalizedKeyword)
+                    || stockName.includes(normalizedKeyword);
+            });
+        }
+
+        function updateResultCount(displayCount) {
+            const resultCount = document.getElementById('resultCount');
+            const totalCount = currentResults.length;
+            resultCount.textContent = currentKeyword
+                ? `匹配 ${displayCount} / 共 ${totalCount} 条`
+                : `共 ${totalCount} 条`;
         }
 
         function exportToExcel() {

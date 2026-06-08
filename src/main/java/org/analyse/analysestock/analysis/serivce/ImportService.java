@@ -31,4 +31,12 @@ public interface ImportService {
      * @return 评分记录
      */
     java.util.List<org.analyse.analysestock.realtimecandidate.dto.RealtimeCandidateScoreRecord> calculateRealtimeCandidateScores(String stockCode, LocalDate tradeDate);
+
+    void prepareTailTradeSnapshot(LocalDate tradeDate);
+
+    void prepareDailyFactorSnapshot(LocalDate tradeDate);
+
+    void prepareMarketContextSnapshot(LocalDate tradeDate);
+
+    void prepareShortSampleStats(LocalDate tradeDate);
 }

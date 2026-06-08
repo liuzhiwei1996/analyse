@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.analyse.analysestock.analysis.mapper.BacktestTopkSummaryMapper">
+
+    <insert id="insertBatch">
+        INSERT INTO backtest_topk_summary (
+            task_id, top_k, cost_bps, trade_days,
+            avg_net_return_bps, daily_win_rate, stock_win_rate,
+            total_return_bps, max_single_day_loss_bps,
+            avg_selected_count, created_at
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+                #{item.taskId}, #{item.topK}, #{item.costBps}, #{item.tradeDays},
+                #{item.avgNetReturnBps}, #{item.dailyWinRate}, #{item.stockWinRate},
+                #{item.totalReturnBps}, #{item.maxSingleDayLossBps},
+                #{item.avgSelectedCount}, #{item.createdAt}
+            )
+        </foreach>
+    </insert>
+
+</mapper>

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.analyse.analysestock.analysis.mapper.StockTailTradeSnapshotMapper">
+
+    <insert id="insertBatch">
+        INSERT INTO stock_tail_trade_snapshot (
+            stock_code, trade_date, price_1400, price_1430,
+            high_before_1430, low_before_1430,
+            tail_amount_1400_1430, tail_volume_1400_1430,
+            amount_before_1430, volume_before_1430,
+            sell_amount_0930_0945, sell_volume_0930_0945, sell_vwap_0930_0945,
+            valid_flag, invalid_reason, created_at, updated_at
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+                #{item.stockCode}, #{item.tradeDate}, #{item.price1400}, #{item.price1430},
+                #{item.highBefore1430}, #{item.lowBefore1430},
+                #{item.tailAmount14001430}, #{item.tailVolume14001430},
+                #{item.amountBefore1430}, #{item.volumeBefore1430},
+                #{item.sellAmount09300945}, #{item.sellVolume09300945}, #{item.sellVwap09300945},
+                #{item.validFlag}, #{item.invalidReason}, #{item.createdAt}, #{item.updatedAt}
+            )
+        </foreach>
+        ON DUPLICATE KEY UPDATE
+            price_1400 = VALUES(price_1400),
+            price_1430 = VALUES(price_1430),
+            high_before_1430 = VALUES(high_before_1430),
+            low_before_1430 = VALUES(low_before_1430),
+            tail_amount_1400_1430 = VALUES(tail_amount_1400_1430),
+            tail_volume_1400_1430 = VALUES(tail_volume_1400_1430),
+            amount_before_1430 = VALUES(amount_before_1430),
+            volume_before_1430 = VALUES(volume_before_1430),
+            sell_amount_0930_0945 = VALUES(sell_amount_0930_0945),
+            sell_volume_0930_0945 = VALUES(sell_volume_0930_0945),
+            sell_vwap_0930_0945 = VALUES(sell_vwap_0930_0945),
+            valid_flag = VALUES(valid_flag),
+            invalid_reason = VALUES(invalid_reason),
+            updated_at = VALUES(updated_at)
+    </insert>
+
+</mapper>

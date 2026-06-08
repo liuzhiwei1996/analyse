@@ -31,6 +31,16 @@
                 #{item.volume}
             )
         </foreach>
+        ON DUPLICATE KEY UPDATE
+            open = VALUES(open),
+            highest = VALUES(highest),
+            lowest = VALUES(lowest),
+            close = VALUES(close),
+            close_foread = VALUES(close_foread),
+            close_backad = VALUES(close_backad),
+            amount = VALUES(amount),
+            close_previous = VALUES(close_previous),
+            volume = VALUES(volume)
     </insert>
     <delete id="deleteByStockCodeAndTradeDate">
         DELETE

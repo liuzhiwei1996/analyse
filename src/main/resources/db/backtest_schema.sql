@@ -1,0 +1,103 @@
+CREATE TABLE IF NOT EXISTS realtime_candidate_score_result (
+    trade_date DATE NOT NULL,
+    stock_code VARCHAR(16) NOT NULL,
+    short_name VARCHAR(64) NULL,
+    price_1430 DECIMAL(18, 4) NULL,
+    final_score DECIMAL(18, 6) NULL,
+    rank_no INT NULL,
+    confidence_level VARCHAR(32) NULL,
+    valid_flag TINYINT(1) NOT NULL DEFAULT 1,
+    strategy_version VARCHAR(32) NOT NULL DEFAULT 'V1',
+    created_at DATETIME NULL,
+    PRIMARY KEY (trade_date, strategy_version, stock_code),
+    KEY idx_score_trade_rank (trade_date, strategy_version, valid_flag, rank_no),
+    KEY idx_score_trade_score (trade_date, strategy_version, valid_flag, final_score)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
+CREATE TABLE IF NOT EXISTS backtest_task (
+    task_id VARCHAR(64) NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    top_k_list VARCHAR(255) NOT NULL,
+    cost_scenario_bps_list VARCHAR(255) NOT NULL,
+    strategy_version VARCHAR(32) NOT NULL,
+    status VARCHAR(16) NOT NULL,
+    backtest_trade_days INT NOT NULL DEFAULT 0,
+    created_at DATETIME NULL,
+    started_at DATETIME NULL,
+    finished_at DATETIME NULL,
+    request_json TEXT NULL,
+    summary_json MEDIUMTEXT NULL,
+    error_message TEXT NULL,
+    PRIMARY KEY (task_id),
+    KEY idx_backtest_task_created (created_at),
+    KEY idx_backtest_task_status (status)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
+CREATE TABLE IF NOT EXISTS backtest_topk_summary (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    task_id VARCHAR(64) NOT NULL,
+    top_k INT NOT NULL,
+    cost_bps DECIMAL(10, 4) NOT NULL,
+    trade_days INT NOT NULL DEFAULT 0,
+    avg_net_return_bps DECIMAL(18, 4) NOT NULL DEFAULT 0,
+    daily_win_rate DECIMAL(10, 4) NOT NULL DEFAULT 0,
+    stock_win_rate DECIMAL(10, 4) NOT NULL DEFAULT 0,
+    total_return_bps DECIMAL(18, 4) NOT NULL DEFAULT 0,
+    max_single_day_loss_bps DECIMAL(18, 4) NOT NULL DEFAULT 0,
+    avg_selected_count DECIMAL(10, 4) NOT NULL DEFAULT 0,
+    created_at DATETIME NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_backtest_topk_summary (task_id, top_k, cost_bps),
+    KEY idx_backtest_topk_task_cost (task_id, cost_bps, top_k)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
+CREATE TABLE IF NOT EXISTS backtest_daily_summary (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    task_id VARCHAR(64) NOT NULL,
+    trade_date DATE NOT NULL,
+    next_trade_date DATE NULL,
+    top_k INT NOT NULL,
+    cost_bps DECIMAL(10, 4) NOT NULL,
+    selected_count INT NOT NULL DEFAULT 0,
+    avg_gross_return_bps DECIMAL(18, 4) NULL,
+    avg_cost_bps DECIMAL(10, 4) NULL,
+    avg_net_return_bps DECIMAL(18, 4) NULL,
+    win_flag TINYINT(1) NULL,
+    best_stock_code VARCHAR(16) NULL,
+    best_stock_return_bps DECIMAL(18, 4) NULL,
+    worst_stock_code VARCHAR(16) NULL,
+    worst_stock_return_bps DECIMAL(18, 4) NULL,
+    created_at DATETIME NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_backtest_daily_summary (task_id, trade_date, top_k, cost_bps),
+    KEY idx_backtest_daily_task_date (task_id, trade_date),
+    KEY idx_backtest_daily_task_topk_cost (task_id, top_k, cost_bps)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
+CREATE TABLE IF NOT EXISTS backtest_trade_detail (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    task_id VARCHAR(64) NOT NULL,
+    trade_date DATE NOT NULL,
+    next_trade_date DATE NULL,
+    top_k INT NULL,
+    cost_bps DECIMAL(10, 4) NOT NULL,
+    stock_code VARCHAR(16) NOT NULL,
+    short_name VARCHAR(64) NULL,
+    rank_no INT NOT NULL,
+    score DECIMAL(18, 6) NULL,
+    confidence_level VARCHAR(32) NULL,
+    buy_price_1430 DECIMAL(18, 4) NULL,
+    sell_vwap_0930_0945 DECIMAL(18, 4) NULL,
+    gross_return_bps DECIMAL(18, 4) NULL,
+    cost_bps_value DECIMAL(10, 4) NULL,
+    slippage_bps DECIMAL(10, 4) NULL,
+    net_return_bps DECIMAL(18, 4) NULL,
+    win_flag TINYINT(1) NULL,
+    invalid_reason VARCHAR(64) NULL,
+    created_at DATETIME NULL,
+    PRIMARY KEY (id),
+    KEY idx_backtest_detail_task_date (task_id, trade_date),
+    KEY idx_backtest_detail_task_rank (task_id, cost_bps, trade_date, rank_no),
+    KEY idx_backtest_detail_task_stock (task_id, stock_code)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;

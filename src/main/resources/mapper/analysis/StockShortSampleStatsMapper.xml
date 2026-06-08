@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.analyse.analysestock.analysis.mapper.StockShortSampleStatsMapper">
+
+    <insert id="insertBatch">
+        INSERT INTO stock_short_sample_stats (
+            stock_code, trade_date, sample_count, win_count, short_win_rate,
+            avg_gross_return_bps, avg_cost_bps, avg_net_return_bps,
+            avg_win_bps, avg_loss_bps, profit_loss_ratio,
+            max_loss_bps, confidence_level, created_at, updated_at
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+                #{item.stockCode}, #{item.tradeDate}, #{item.sampleCount}, #{item.winCount}, #{item.shortWinRate},
+                #{item.avgGrossReturnBps}, #{item.avgCostBps}, #{item.avgNetReturnBps},
+                #{item.avgWinBps}, #{item.avgLossBps}, #{item.profitLossRatio},
+                #{item.maxLossBps}, #{item.confidenceLevel}, #{item.createdAt}, #{item.updatedAt}
+            )
+        </foreach>
+        ON DUPLICATE KEY UPDATE
+            sample_count = VALUES(sample_count),
+            win_count = VALUES(win_count),
+            short_win_rate = VALUES(short_win_rate),
+            avg_gross_return_bps = VALUES(avg_gross_return_bps),
+            avg_cost_bps = VALUES(avg_cost_bps),
+            avg_net_return_bps = VALUES(avg_net_return_bps),
+            avg_win_bps = VALUES(avg_win_bps),
+            avg_loss_bps = VALUES(avg_loss_bps),
+            profit_loss_ratio = VALUES(profit_loss_ratio),
+            max_loss_bps = VALUES(max_loss_bps),
+            confidence_level = VALUES(confidence_level),
+            updated_at = VALUES(updated_at)
+    </insert>
+
+</mapper>

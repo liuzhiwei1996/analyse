@@ -31,4 +31,7 @@ public interface AnalysisApi {
 
     @PostMapping("/calculateCandidateScore")
     ResultData<java.util.List<org.analyse.analysestock.realtimecandidate.dto.RealtimeCandidateScoreRecord>> calculateCandidateScore(StockInfoVo stockInfoVo);
+
+    @PostMapping("/prepareSnapshots")
+    ResultData<String> prepareSnapshots(StockInfoVo stockInfoVo);
 }

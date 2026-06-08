@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.analyse.analysestock.analysis.mapper.SectorContextSnapshotMapper">
+
+    <insert id="insertBatch">
+        INSERT INTO sector_context_snapshot (
+            trade_date, sector, sector_breadth_1430, sector_return_1430,
+            sector_avg_tail_momentum, sector_rank, sector_score,
+            valid_stock_count, created_at, updated_at
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+                #{item.tradeDate}, #{item.sector}, #{item.sectorBreadth1430}, #{item.sectorReturn1430},
+                #{item.sectorAvgTailMomentum}, #{item.sectorRank}, #{item.sectorScore},
+                #{item.validStockCount}, #{item.createdAt}, #{item.updatedAt}
+            )
+        </foreach>
+        ON DUPLICATE KEY UPDATE
+            sector_breadth_1430 = VALUES(sector_breadth_1430),
+            sector_return_1430 = VALUES(sector_return_1430),
+            sector_avg_tail_momentum = VALUES(sector_avg_tail_momentum),
+            sector_rank = VALUES(sector_rank),
+            sector_score = VALUES(sector_score),
+            valid_stock_count = VALUES(valid_stock_count),
+            updated_at = VALUES(updated_at)
+    </insert>
+
+</mapper>

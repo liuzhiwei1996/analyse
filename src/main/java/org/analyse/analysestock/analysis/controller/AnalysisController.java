@@ -57,4 +57,29 @@ public class AnalysisController implements AnalysisApi {
     public ResultData<List<RealtimeCandidateScoreRecord>> calculateCandidateScore(@RequestBody StockInfoVo stockInfoVo) {
         return ResultUtil.success(importService.calculateRealtimeCandidateScores(stockInfoVo.getStockCode(), stockInfoVo.getTradeDate()));
     }
+
+    @Override
+    @PostMapping("/prepareSnapshots")
+    public ResultData<String> prepareSnapshots(@RequestBody StockInfoVo stockInfoVo) {
+        LocalDate tradeDate = stockInfoVo.getTradeDate();
+        if (tradeDate == null) {
+            tradeDate = LocalDate.now();
+        }
+        log.info("开始生成 {} 的全套因子快照", tradeDate);
+
+        // 1. 生成尾盘交易快照 (基础)
+        importService.prepareTailTradeSnapshot(tradeDate);
+
+        // 2. 生成日K因子快照
+        importService.prepareDailyFactorSnapshot(tradeDate);
+        
+        // 3. 生成短样本统计快照
+        importService.prepareShortSampleStats(tradeDate);
+        
+        // 4. 生成市场环境和板块快照 (依赖步骤1)
+        importService.prepareMarketContextSnapshot(tradeDate);
+        
+        log.info("{} 的全套因子快照生成完成", tradeDate);
+        return ResultUtil.success("快照生成成功");
+    }
 }
