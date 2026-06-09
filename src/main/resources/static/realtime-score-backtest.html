@@ -186,6 +186,13 @@
             gap: 10px;
         }
 
+        .header-actions {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
         .actions {
             margin-top: 18px;
         }
@@ -309,7 +316,7 @@
 
         table {
             width: 100%;
-            min-width: 980px;
+            min-width: 1120px;
             border-collapse: collapse;
         }
 
@@ -342,6 +349,12 @@
             padding: 0 10px;
             font-weight: 900;
             background: rgba(24, 33, 25, 0.08);
+        }
+
+        .stock-code {
+            font-family: "Iosevka", "Cascadia Code", "Consolas", monospace;
+            font-weight: 900;
+            letter-spacing: 0.02em;
         }
 
         .tag-running {
@@ -513,7 +526,10 @@
         <section class="panel">
             <div class="panel-header">
                 <h2 class="panel-title">任务与结果</h2>
-                <button class="btn btn-line" id="refreshSummaryButton" type="button">刷新当前任务</button>
+                <div class="header-actions">
+                    <button class="btn btn-line" id="refreshSummaryButton" type="button">刷新当前任务</button>
+                    <button class="btn btn-primary" id="exportExcelButton" type="button">导出 Excel</button>
+                </div>
             </div>
             <div class="panel-body">
                 <div class="metrics">
@@ -542,11 +558,14 @@
                                 <th>单票胜率</th>
                                 <th>总收益 bps</th>
                                 <th>最大单日亏损 bps</th>
+                                <th>成交率</th>
+                                <th>买入分布</th>
+                                <th>止盈分布</th>
                                 <th>平均选股数</th>
                             </tr>
                             </thead>
                             <tbody id="summaryBody">
-                            <tr><td colspan="9" class="empty">创建任务后显示汇总结果</td></tr>
+                            <tr><td colspan="12" class="empty">创建任务后显示汇总结果</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -572,13 +591,15 @@
                                 <th>毛收益 bps</th>
                                 <th>净收益 bps</th>
                                 <th>胜负</th>
-                                <th>最佳股票</th>
-                                <th>最差股票</th>
+                                <th>最佳股票代码</th>
+                                <th>最佳收益 bps</th>
+                                <th>最差股票代码</th>
+                                <th>最差收益 bps</th>
                                 <th>操作</th>
                             </tr>
                             </thead>
                             <tbody id="dailyBody">
-                            <tr><td colspan="11" class="empty">选择任务后查询每日结果</td></tr>
+                            <tr><td colspan="13" class="empty">选择任务后查询每日结果</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -602,7 +623,9 @@
                                 <th>简称</th>
                                 <th>评分</th>
                                 <th>买入价</th>
-                                <th>卖出 VWAP</th>
+                                <th>买入规则</th>
+                                <th>卖出价</th>
+                                <th>卖出规则</th>
                                 <th>毛收益 bps</th>
                                 <th>净收益 bps</th>
                                 <th>胜负</th>
@@ -610,7 +633,7 @@
                             </tr>
                             </thead>
                             <tbody id="detailBody">
-                            <tr><td colspan="11" class="empty">选择任务后查询明细</td></tr>
+                            <tr><td colspan="14" class="empty">选择任务后查询明细</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -654,6 +677,9 @@
         win: '\u8d62',
         lose: '\u8f93',
         detail: '\u770b\u660e\u7ec6',
+        exportExcel: '\u5bfc\u51fa Excel',
+        exporting: '\u5bfc\u51fa\u4e2d...',
+        exportOnlyFinished: '\u8bf7\u7b49\u56de\u6d4b\u4efb\u52a1\u5b8c\u6210\u540e\u518d\u5bfc\u51fa',
         apiFail: '\u63a5\u53e3\u8fd4\u56de\u5931\u8d25'
     };
 
@@ -679,6 +705,7 @@
         });
         document.getElementById('resetButton').addEventListener('click', resetForm);
         document.getElementById('refreshSummaryButton').addEventListener('click', refreshCurrentTask);
+        document.getElementById('exportExcelButton').addEventListener('click', exportExcel);
         document.getElementById('loadDailyButton').addEventListener('click', loadDaily);
         document.getElementById('loadDetailButton').addEventListener('click', loadDetail);
         document.querySelectorAll('.tab').forEach(tab => {
@@ -816,6 +843,41 @@
         renderDetail(unwrap(await getJson(api.detail(state.taskId) + params)) || []);
     }
 
+    /* Export the whole finished task as an Excel-readable workbook. */
+    async function exportExcel() {
+        if (!ensureTask()) {
+            return;
+        }
+        setExporting(true);
+        try {
+            const task = unwrap(await getJson(api.task(state.taskId)));
+            updateTaskView(task);
+            if (task.status !== 'FINISHED') {
+                alert(text.exportOnlyFinished);
+                return;
+            }
+
+            const summaryPromise = state.currentSummary && state.currentSummary.taskId === state.taskId
+                ? Promise.resolve(state.currentSummary)
+                : getJson(api.summary(state.taskId)).then(unwrap);
+            const [summary, dailyRows, detailRows] = await Promise.all([
+                summaryPromise,
+                getJson(api.daily(state.taskId)).then(unwrap),
+                getJson(api.detail(state.taskId)).then(unwrap)
+            ]);
+
+            state.currentSummary = summary;
+            downloadExcel(
+                buildBacktestWorkbook(summary, dailyRows || [], detailRows || []),
+                buildExportFileName(summary)
+            );
+        } catch (error) {
+            showError(error);
+        } finally {
+            setExporting(false);
+        }
+    }
+
     /* Drill down from a daily row to trade details. */
     function loadDetailFromDaily(tradeDate, topK, costBps) {
         switchTab('detail');
@@ -859,6 +921,13 @@
                 <td>${formatRate(row.stockWinRate)}</td>
                 <td class="${numberClass(row.totalReturnBps)}">${formatBps(row.totalReturnBps)}</td>
                 <td class="${numberClass(row.maxSingleDayLossBps)}">${formatBps(row.maxSingleDayLossBps)}</td>
+                <td>${formatRate(row.buyFillRate)}</td>
+                <td style="font-size: 11px; white-space: nowrap">
+                    3%:${row.buy3pctCount || 0} | 2%:${row.buy2pctCount || 0} | 1%:${row.buy1pctCount || 0}
+                </td>
+                <td style="font-size: 11px; white-space: nowrap">
+                    止盈:${(row.sell3pctCount || 0) + (row.sell2pctCount || 0) + (row.sell1pctCount || 0)} | 09:45:${row.forceSell0945Count || 0}
+                </td>
                 <td>${formatNumber(row.avgSelectedCount)}</td>
             </tr>
         `).join('');
@@ -868,7 +937,7 @@
     function renderDaily(rows) {
         const body = document.getElementById('dailyBody');
         if (!rows.length) {
-            body.innerHTML = `<tr><td colspan="11" class="empty">${text.emptyDaily}</td></tr>`;
+            body.innerHTML = `<tr><td colspan="13" class="empty">${text.emptyDaily}</td></tr>`;
             return;
         }
         body.innerHTML = rows.map(row => `
@@ -881,8 +950,10 @@
                 <td class="${numberClass(row.avgGrossReturnBps)}">${formatBps(row.avgGrossReturnBps)}</td>
                 <td class="${numberClass(row.avgNetReturnBps)}">${formatBps(row.avgNetReturnBps)}</td>
                 <td>${row.winFlag ? `<span class="tag tag-finished">${text.profit}</span>` : `<span class="tag tag-failed">${text.loss}</span>`}</td>
-                <td>${row.bestStockCode || '-'} ${formatBps(row.bestStockReturnBps)}</td>
-                <td>${row.worstStockCode || '-'} ${formatBps(row.worstStockReturnBps)}</td>
+                <td class="stock-code">${row.bestStockCode || '-'}</td>
+                <td class="${numberClass(row.bestStockReturnBps)}">${formatBps(row.bestStockReturnBps)}</td>
+                <td class="stock-code">${row.worstStockCode || '-'}</td>
+                <td class="${numberClass(row.worstStockReturnBps)}">${formatBps(row.worstStockReturnBps)}</td>
                 <td><button class="btn btn-line" type="button" onclick="loadDetailFromDaily('${row.tradeDate}', ${row.topK}, '${row.costBps}')">${text.detail}</button></td>
             </tr>
         `).join('');
@@ -902,14 +973,209 @@
                 <td>${row.stockCode || '-'}</td>
                 <td>${row.shortName || '-'}</td>
                 <td>${formatNumber(row.score)}</td>
-                <td>${formatPrice(row.buyPrice1430)}</td>
-                <td>${formatPrice(row.sellVwap09300945)}</td>
+                <td>${formatPrice(row.buyPrice || row.buyPrice1430)}</td>
+                <td>${row.buyRule || '-'}</td>
+                <td>${formatPrice(row.sellPrice || row.sellVwap09300945)}</td>
+                <td>${row.sellRule || '-'}</td>
                 <td class="${numberClass(row.grossReturnBps)}">${formatBps(row.grossReturnBps)}</td>
                 <td class="${numberClass(row.netReturnBps)}">${formatBps(row.netReturnBps)}</td>
                 <td>${row.winFlag === true ? text.win : row.winFlag === false ? text.lose : '-'}</td>
                 <td>${row.invalidReason || '-'}</td>
             </tr>
         `).join('');
+    }
+
+    /* Build a SpreadsheetML workbook for Excel without extra dependencies. */
+    function buildBacktestWorkbook(summary, dailyRows, detailRows) {
+        const safeSummary = summary || {};
+        return buildExcelXml([
+            buildInfoSheet(safeSummary),
+            buildColumnSheet('TopK汇总', summaryExportColumns(), safeSummary.topKResults || []),
+            buildColumnSheet('每日收益', dailyExportColumns(), dailyRows || []),
+            buildColumnSheet('选股明细', detailExportColumns(), detailRows || [])
+        ]);
+    }
+
+    /* Build the task metadata sheet. */
+    function buildInfoSheet(summary) {
+        const rows = [
+            ['字段', '值'],
+            ['任务 ID', summary.taskId || state.taskId || ''],
+            ['开始日期', summary.startDate || ''],
+            ['结束日期', summary.endDate || ''],
+            ['有效交易日', summary.backtestTradeDays ?? ''],
+            ['策略版本', summary.strategyVersion || ''],
+            ['导出时间', formatDateTime(new Date())]
+        ];
+        return {
+            name: '任务信息',
+            rows: rows.map(row => row.map(value => excelCell(value, 'String')))
+        };
+    }
+
+    /* Convert row objects to a worksheet by column descriptors. */
+    function buildColumnSheet(name, columns, rows) {
+        const sheetRows = [columns.map(column => excelCell(column.label, 'String'))];
+        rows.forEach(row => {
+            sheetRows.push(columns.map(column => excelCell(column.value(row), column.type)));
+        });
+        return { name, rows: sheetRows };
+    }
+
+    function summaryExportColumns() {
+        return [
+            { label: '成本 bps', type: 'Number', value: row => row.costBps },
+            { label: 'TopK', type: 'Number', value: row => row.topK },
+            { label: '交易日', type: 'Number', value: row => row.tradeDays },
+            { label: '平均净收益 bps', type: 'Number', value: row => row.avgNetReturnBps },
+            { label: '日胜率', value: row => formatRate(row.dailyWinRate) },
+            { label: '单票胜率', value: row => formatRate(row.stockWinRate) },
+            { label: '总收益 bps', type: 'Number', value: row => row.totalReturnBps },
+            { label: '最大单日亏损 bps', type: 'Number', value: row => row.maxSingleDayLossBps },
+            { label: '候选股票数', type: 'Number', value: row => row.candidateCount },
+            { label: '买入股票数', type: 'Number', value: row => row.boughtCount },
+            { label: '买入成交率', value: row => formatRate(row.buyFillRate) },
+            { label: '3%买入数', type: 'Number', value: row => row.buy3pctCount },
+            { label: '2%买入数', type: 'Number', value: row => row.buy2pctCount },
+            { label: '1%买入数', type: 'Number', value: row => row.buy1pctCount },
+            { label: '3%止盈数', type: 'Number', value: row => row.sell3pctCount },
+            { label: '2%止盈数', type: 'Number', value: row => row.sell2pctCount },
+            { label: '1%止盈数', type: 'Number', value: row => row.sell1pctCount },
+            { label: '09:45强制卖出数', type: 'Number', value: row => row.forceSell0945Count },
+            { label: '平均选股数', type: 'Number', value: row => row.avgSelectedCount }
+        ];
+    }
+
+    function dailyExportColumns() {
+        return [
+            { label: '交易日', type: 'String', value: row => row.tradeDate },
+            { label: '次交易日', type: 'String', value: row => row.nextTradeDate },
+            { label: 'TopK', type: 'Number', value: row => row.topK },
+            { label: '成本 bps', type: 'Number', value: row => row.costBps },
+            { label: '有效股票数', type: 'Number', value: row => row.selectedCount },
+            { label: '平均毛收益 bps', type: 'Number', value: row => row.avgGrossReturnBps },
+            { label: '平均成本 bps', type: 'Number', value: row => row.avgCostBps },
+            { label: '平均净收益 bps', type: 'Number', value: row => row.avgNetReturnBps },
+            { label: '胜负', value: row => formatWinFlag(row.winFlag) },
+            { label: '最佳股票代码', type: 'String', value: row => row.bestStockCode },
+            { label: '最佳收益 bps', type: 'Number', value: row => row.bestStockReturnBps },
+            { label: '最差股票代码', type: 'String', value: row => row.worstStockCode },
+            { label: '最差收益 bps', type: 'Number', value: row => row.worstStockReturnBps }
+        ];
+    }
+
+    function detailExportColumns() {
+        return [
+            { label: '交易日', type: 'String', value: row => row.tradeDate },
+            { label: '次交易日', type: 'String', value: row => row.nextTradeDate },
+            { label: '排名', type: 'Number', value: row => row.rankNo },
+            { label: '成本 bps', type: 'Number', value: row => row.costBps },
+            { label: '股票代码', type: 'String', value: row => row.stockCode },
+            { label: '简称', type: 'String', value: row => row.shortName },
+            { label: '评分', type: 'Number', value: row => row.score },
+            { label: '置信度', type: 'String', value: row => row.confidenceLevel },
+            { label: '14:30买入参考价', type: 'Number', value: row => row.buyPrice1430 },
+            { label: '买入触发价', type: 'Number', value: row => row.buyTriggerPrice },
+            { label: '实际买入价', type: 'Number', value: row => row.buyPrice },
+            { label: '买入时间', type: 'String', value: row => row.buyTime },
+            { label: '买入规则', type: 'String', value: row => row.buyRule },
+            { label: '买入成交', value: row => formatBoolean(row.buyFilled) },
+            { label: '09:30-09:45卖出 VWAP', type: 'Number', value: row => row.sellVwap09300945 },
+            { label: '卖出触发价', type: 'Number', value: row => row.sellTriggerPrice },
+            { label: '实际卖出价', type: 'Number', value: row => row.sellPrice },
+            { label: '卖出时间', type: 'String', value: row => row.sellTime },
+            { label: '卖出规则', type: 'String', value: row => row.sellRule },
+            { label: '卖出成交', value: row => formatBoolean(row.sellFilled) },
+            { label: '毛收益 bps', type: 'Number', value: row => row.grossReturnBps },
+            { label: '固定成本 bps', type: 'Number', value: row => row.costBpsValue },
+            { label: '滑点 bps', type: 'Number', value: row => row.slippageBps },
+            { label: '净收益 bps', type: 'Number', value: row => row.netReturnBps },
+            { label: '胜负', value: row => formatWinFlag(row.winFlag) },
+            { label: '无效原因', type: 'String', value: row => row.invalidReason }
+        ];
+    }
+
+    /* Build SpreadsheetML XML accepted by desktop Excel. */
+    function buildExcelXml(sheets) {
+        const worksheetXml = sheets.map(sheet => `
+            <Worksheet ss:Name="${escapeXml(sheet.name)}">
+                <Table>
+                    ${sheet.rows.map(row => `<Row>${row.map(renderExcelCell).join('')}</Row>`).join('')}
+                </Table>
+            </Worksheet>
+        `).join('');
+        return `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+          xmlns:o="urn:schemas-microsoft-com:office:office"
+          xmlns:x="urn:schemas-microsoft-com:office:excel"
+          xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+    <DocumentProperties xmlns="urn:schemas-microsoft-com:office:office">
+        <Created>${new Date().toISOString()}</Created>
+    </DocumentProperties>
+    ${worksheetXml}
+</Workbook>`;
+    }
+
+    function excelCell(value, type) {
+        return { value, type };
+    }
+
+    function renderExcelCell(cell) {
+        const value = cell.value;
+        if (cell.type === 'Number' && isFiniteCellNumber(value)) {
+            return `<Cell><Data ss:Type="Number">${Number(value)}</Data></Cell>`;
+        }
+        const textValue = value === null || value === undefined ? '' : String(value);
+        return `<Cell><Data ss:Type="String">${escapeXml(textValue)}</Data></Cell>`;
+    }
+
+    function isFiniteCellNumber(value) {
+        if (value === null || value === undefined || value === '') {
+            return false;
+        }
+        return Number.isFinite(Number(value));
+    }
+
+    function downloadExcel(xml, fileName) {
+        const blob = new Blob(['\ufeff', xml], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    }
+
+    function buildExportFileName(summary) {
+        const taskPart = (summary.taskId || state.taskId || 'task').slice(0, 8);
+        const start = summary.startDate || 'start';
+        const end = summary.endDate || 'end';
+        return `realtime-score-backtest_${start}_${end}_${taskPart}.xls`;
+    }
+
+    function escapeXml(value) {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&apos;');
+    }
+
+    function formatWinFlag(value) {
+        return value === true ? text.profit : value === false ? text.loss : '';
+    }
+
+    function formatBoolean(value) {
+        return value === true ? '是' : value === false ? '否' : '';
+    }
+
+    function formatDateTime(date) {
+        const pad = number => String(number).padStart(2, '0');
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
     }
 
     /* Fill daily/detail filters from the preferred summary row. */
@@ -968,6 +1234,13 @@
         const button = document.getElementById('runButton');
         button.disabled = running;
         button.textContent = running ? text.running : text.run;
+    }
+
+    /* Toggle export button state. */
+    function setExporting(exporting) {
+        const button = document.getElementById('exportExcelButton');
+        button.disabled = exporting;
+        button.textContent = exporting ? text.exporting : text.exportExcel;
     }
 
     /* POST JSON helper. */

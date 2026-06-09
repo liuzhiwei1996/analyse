@@ -24,17 +24,16 @@ public interface TradingDateMapper extends BaseMapper<TradingDate> {
      *
      * @return
      */
-    LocalDate getNewsetTradingDate(@Param("holdingDate") LocalDate holdingDate, @Param("market") int market);
+    LocalDate getNewsetTradingDate(@Param("holdingDate") LocalDate holdingDate);
 
     /**
      * SqlServer 个股列表数据导入查询 交易日期 最早为20210101
      *
      * @param holdingDate
      * @param num
-     * @param market
      * @return
      */
-    LocalDate findTradingDateSqlServerStockCode(@Param("holdingDate") LocalDate holdingDate, @Param("num") int num, @Param("market") int market);
+    LocalDate findTradingDateSqlServerStockCode(@Param("holdingDate") LocalDate holdingDate, @Param("num") int num);
 
     int isTradeDate(@Param("tradeDate") LocalDate tradeDate);
 

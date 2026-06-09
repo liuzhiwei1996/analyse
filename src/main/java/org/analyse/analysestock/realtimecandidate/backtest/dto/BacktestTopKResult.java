@@ -54,4 +54,54 @@ public class BacktestTopKResult {
      * 平均每日有效选股数量。
      */
     private BigDecimal avgSelectedCount;
+
+    /**
+     * 候选股票总数。
+     */
+    private Integer candidateCount;
+
+    /**
+     * 实际买入股票总数。
+     */
+    private Integer boughtCount;
+
+    /**
+     * 买入成交率。
+     */
+    private BigDecimal buyFillRate;
+
+    /**
+     * 3% 档买入数量。
+     */
+    private Integer buy3pctCount;
+
+    /**
+     * 2% 档买入数量。
+     */
+    private Integer buy2pctCount;
+
+    /**
+     * 1% 档买入数量。
+     */
+    private Integer buy1pctCount;
+
+    /**
+     * 3% 止盈卖出数量。
+     */
+    private Integer sell3pctCount;
+
+    /**
+     * 2% 止盈卖出数量。
+     */
+    private Integer sell2pctCount;
+
+    /**
+     * 1% 止盈卖出数量。
+     */
+    private Integer sell1pctCount;
+
+    /**
+     * 09:45 强制卖出数量。
+     */
+    private Integer forceSell0945Count;
 }

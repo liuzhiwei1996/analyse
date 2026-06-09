@@ -80,6 +80,11 @@ public class RealtimeScoreBacktestServiceImpl implements RealtimeScoreBacktestSe
      * 未传策略版本时使用的默认评分版本。
      */
     private static final String DEFAULT_STRATEGY_VERSION = "V1";
+
+    /**
+     * 新的分阶段低吸买入 + 次日早盘分阶段止盈卖出策略版本。
+     */
+    private static final String STRATEGY_LIMIT_BUY_TAKE_PROFIT_V1 = "REALTIME_CANDIDATE_LIMIT_BUY_TAKE_PROFIT_V1";
     /**
      * 收益率转换为 bps 的乘数。
      */
@@ -128,6 +133,12 @@ public class RealtimeScoreBacktestServiceImpl implements RealtimeScoreBacktestSe
      */
     @Autowired
     private StockTailTradeSnapshotMapper stockTailTradeSnapshotMapper;
+
+    /**
+     * 盘中执行快照。
+     */
+    @Autowired
+    private org.analyse.analysestock.analysis.mapper.StockIntradayExecutionSnapshotMapper stockIntradayExecutionSnapshotMapper;
 
     /**
      * 交易日历，用于计算 T+1。
@@ -294,6 +305,7 @@ public class RealtimeScoreBacktestServiceImpl implements RealtimeScoreBacktestSe
         Map<LocalDate, List<RealtimeCandidateScoreResult>> scoreMap = scores.stream()
                 .collect(Collectors.groupingBy(RealtimeCandidateScoreResult::getTradeDate, LinkedHashMap::new, Collectors.toList()));
         Map<String, StockTailTradeSnapshot> snapshotMap = loadTailSnapshots(request);
+        Map<String, org.analyse.analysestock.analysis.entity.StockIntradayExecutionSnapshot> executionMap = loadExecutionSnapshots(request);
         Map<LocalDate, LocalDate> nextDateMap = loadNextTradeDates(scoreMap.keySet());
 
         List<BacktestTradeDetail> allDetails = new ArrayList<>();
@@ -318,7 +330,12 @@ public class RealtimeScoreBacktestServiceImpl implements RealtimeScoreBacktestSe
                     RealtimeCandidateScoreResult score = selectedScores.get(i);
                     // 使用本次稳定排序后的名次，避免原始 rankNo 为空或断档影响 rankNo <= topK 查询。
                     Integer effectiveRankNo = i + 1;
-                    BacktestTradeDetail detail = buildTradeDetail(taskId, request, score, effectiveRankNo, nextTradeDate, snapshotMap, costScenarioBps);
+                    BacktestTradeDetail detail;
+                    if (STRATEGY_LIMIT_BUY_TAKE_PROFIT_V1.equals(request.getStrategyVersion())) {
+                        detail = buildTradeDetailV2(taskId, request, score, effectiveRankNo, nextTradeDate, executionMap, costScenarioBps);
+                    } else {
+                        detail = buildTradeDetail(taskId, request, score, effectiveRankNo, nextTradeDate, snapshotMap, costScenarioBps);
+                    }
                     scenarioDetails.add(detail);
                 }
                 allDetails.addAll(scenarioDetails);
@@ -396,12 +413,29 @@ public class RealtimeScoreBacktestServiceImpl implements RealtimeScoreBacktestSe
     }
 
     /**
+     * 加载盘中执行快照。
+     */
+    private Map<String, org.analyse.analysestock.analysis.entity.StockIntradayExecutionSnapshot> loadExecutionSnapshots(RealtimeScoreBacktestRequest request) {
+        LambdaQueryWrapper<org.analyse.analysestock.analysis.entity.StockIntradayExecutionSnapshot> query = new LambdaQueryWrapper<>();
+        // 买入需要在 T 日，卖出需要在 T+1 日，所以范围需要覆盖 T 到 T+1
+        // 实际上 endDate 可能没有 T+1，所以多加载一些日期是安全的
+        query.ge(org.analyse.analysestock.analysis.entity.StockIntradayExecutionSnapshot::getTradeDate, request.getStartDate())
+                .le(org.analyse.analysestock.analysis.entity.StockIntradayExecutionSnapshot::getTradeDate, request.getEndDate().plusDays(10));
+        List<org.analyse.analysestock.analysis.entity.StockIntradayExecutionSnapshot> list = stockIntradayExecutionSnapshotMapper.selectList(query);
+        Map<String, org.analyse.analysestock.analysis.entity.StockIntradayExecutionSnapshot> map = new HashMap<>();
+        for (org.analyse.analysestock.analysis.entity.StockIntradayExecutionSnapshot snapshot : list) {
+            map.put(snapshotKey(snapshot.getTradeDate(), snapshot.getStockCode()), snapshot);
+        }
+        return map;
+    }
+
+    /**
      * 为每个评分交易日计算下一交易日。
      */
     private Map<LocalDate, LocalDate> loadNextTradeDates(Set<LocalDate> tradeDates) {
         Map<LocalDate, LocalDate> nextDateMap = new HashMap<>();
         for (LocalDate tradeDate : tradeDates) {
-            LocalDate nextTradeDate = tradingDateMapper.findTradingDateSqlServerStockCode(tradeDate, 0, 1);
+            LocalDate nextTradeDate = tradingDateMapper.findTradingDateSqlServerStockCode(tradeDate, 0);
             nextDateMap.put(tradeDate, nextTradeDate);
         }
         return nextDateMap;
@@ -435,8 +469,152 @@ public class RealtimeScoreBacktestServiceImpl implements RealtimeScoreBacktestSe
     }
 
     /**
-     * 构建单票回测明细，并在价格完整时计算毛收益和净收益。
+     * 构建分阶段买卖回测明细。
      */
+    private BacktestTradeDetail buildTradeDetailV2(
+            String taskId,
+            RealtimeScoreBacktestRequest request,
+            RealtimeCandidateScoreResult score,
+            Integer effectiveRankNo,
+            LocalDate nextTradeDate,
+            Map<String, org.analyse.analysestock.analysis.entity.StockIntradayExecutionSnapshot> executionMap,
+            BigDecimal costScenarioBps
+    ) {
+        LocalDateTime now = LocalDateTime.now();
+        org.analyse.analysestock.analysis.entity.StockIntradayExecutionSnapshot tSnapshot = executionMap.get(snapshotKey(score.getTradeDate(), score.getStockCode()));
+        org.analyse.analysestock.analysis.entity.StockIntradayExecutionSnapshot tPlus1Snapshot = nextTradeDate == null ? null : executionMap.get(snapshotKey(nextTradeDate, score.getStockCode()));
+
+        BigDecimal basePrice = score.getPrice1430();
+        if (basePrice == null && tSnapshot != null) {
+            basePrice = tSnapshot.getPrice1430();
+        }
+
+        BacktestTradeDetail detail = new BacktestTradeDetail();
+        detail.setTaskId(taskId);
+        detail.setTradeDate(score.getTradeDate());
+        detail.setNextTradeDate(nextTradeDate);
+        detail.setCostBps(costScenarioBps);
+        detail.setStockCode(score.getStockCode());
+        detail.setShortName(score.getShortName());
+        detail.setRankNo(effectiveRankNo);
+        detail.setScore(score.getFinalScore());
+        detail.setConfidenceLevel(score.getConfidenceLevel());
+        detail.setBuyPrice1430(basePrice);
+        setCostComponents(detail, request, costScenarioBps);
+        detail.setCreatedAt(now);
+
+        if (basePrice == null || basePrice.compareTo(BigDecimal.ZERO) <= 0) {
+            detail.setInvalidReason("NO_BASE_PRICE_1430");
+            return detail;
+        }
+
+        // 1. 买入判断
+        boolean bought = false;
+        if (tSnapshot != null) {
+            // 14:35 后跌 3%
+            BigDecimal trigger3 = basePrice.multiply(new BigDecimal("0.97"));
+            if (tSnapshot.getLow14351444() != null && tSnapshot.getLow14351444().compareTo(trigger3) <= 0) {
+                detail.setBuyTriggerPrice(trigger3);
+                detail.setBuyPrice(trigger3);
+                detail.setBuyTime("14:35-14:44");
+                detail.setBuyRule("BUY_DROP_3PCT_AFTER_1435");
+                bought = true;
+            } else {
+                // 14:45 后跌 2%
+                BigDecimal trigger2 = basePrice.multiply(new BigDecimal("0.98"));
+                if (tSnapshot.getLow14451454() != null && tSnapshot.getLow14451454().compareTo(trigger2) <= 0) {
+                    detail.setBuyTriggerPrice(trigger2);
+                    detail.setBuyPrice(trigger2);
+                    detail.setBuyTime("14:45-14:54");
+                    detail.setBuyRule("BUY_DROP_2PCT_AFTER_1445");
+                    bought = true;
+                } else {
+                    // 14:55 后跌 1%
+                    BigDecimal trigger1 = basePrice.multiply(new BigDecimal("0.99"));
+                    if (tSnapshot.getLow14551500() != null && tSnapshot.getLow14551500().compareTo(trigger1) <= 0) {
+                        detail.setBuyTriggerPrice(trigger1);
+                        detail.setBuyPrice(trigger1);
+                        detail.setBuyTime("14:55-15:00");
+                        detail.setBuyRule("BUY_DROP_1PCT_AFTER_1455");
+                        bought = true;
+                    }
+                }
+            }
+        }
+
+        if (!bought) {
+            detail.setBuyFilled(false);
+            detail.setBuyRule("NOT_FILLED");
+            return detail;
+        }
+        detail.setBuyFilled(true);
+
+        // 2. 卖出判断
+        if (nextTradeDate == null) {
+            detail.setInvalidReason("NO_NEXT_TRADE_DATE");
+            return detail;
+        }
+        if (tPlus1Snapshot == null) {
+            detail.setInvalidReason("NO_T_PLUS_1_SNAPSHOT");
+            return detail;
+        }
+
+        BigDecimal buyPrice = detail.getBuyPrice();
+        boolean sold = false;
+        // 09:35 前涨 3%
+        BigDecimal sellTrigger3 = buyPrice.multiply(new BigDecimal("1.03"));
+        if (tPlus1Snapshot.getHigh09300935() != null && tPlus1Snapshot.getHigh09300935().compareTo(sellTrigger3) >= 0) {
+            detail.setSellTriggerPrice(sellTrigger3);
+            detail.setSellPrice(sellTrigger3);
+            detail.setSellTime("09:30-09:35");
+            detail.setSellRule("SELL_PROFIT_3PCT_BEFORE_0935");
+            sold = true;
+        } else {
+            // 09:40 前涨 2%
+            BigDecimal sellTrigger2 = buyPrice.multiply(new BigDecimal("1.02"));
+            if (tPlus1Snapshot.getHigh09360940() != null && tPlus1Snapshot.getHigh09360940().compareTo(sellTrigger2) >= 0) {
+                detail.setSellTriggerPrice(sellTrigger2);
+                detail.setSellPrice(sellTrigger2);
+                detail.setSellTime("09:36-09:40");
+                detail.setSellRule("SELL_PROFIT_2PCT_BEFORE_0940");
+                sold = true;
+            } else {
+                // 09:44 前涨 1%
+                BigDecimal sellTrigger1 = buyPrice.multiply(new BigDecimal("1.01"));
+                if (tPlus1Snapshot.getHigh09410944() != null && tPlus1Snapshot.getHigh09410944().compareTo(sellTrigger1) >= 0) {
+                    detail.setSellTriggerPrice(sellTrigger1);
+                    detail.setSellPrice(sellTrigger1);
+                    detail.setSellTime("09:41-09:44");
+                    detail.setSellRule("SELL_PROFIT_1PCT_BEFORE_0944");
+                    sold = true;
+                } else {
+                    // 09:45 强制卖出
+                    if (tPlus1Snapshot.getPrice0945() != null) {
+                        detail.setSellPrice(tPlus1Snapshot.getPrice0945());
+                        detail.setSellTime("09:45");
+                        detail.setSellRule("FORCE_SELL_0945");
+                        sold = true;
+                    } else {
+                        detail.setInvalidReason("NO_SELL_PRICE_0945");
+                        return detail;
+                    }
+                }
+            }
+        }
+        detail.setSellFilled(sold);
+
+        BigDecimal sellPrice = detail.getSellPrice();
+        BigDecimal grossReturnBps = sellPrice.subtract(buyPrice)
+                .divide(buyPrice, 8, RoundingMode.HALF_UP)
+                .multiply(BPS_BASE)
+                .setScale(SCALE, RoundingMode.HALF_UP);
+        BigDecimal netReturnBps = grossReturnBps.subtract(costScenarioBps).setScale(SCALE, RoundingMode.HALF_UP);
+        detail.setGrossReturnBps(grossReturnBps);
+        detail.setNetReturnBps(netReturnBps);
+        detail.setWinFlag(netReturnBps.compareTo(BigDecimal.ZERO) > 0);
+
+        return detail;
+    }
     private BacktestTradeDetail buildTradeDetail(
             String taskId,
             RealtimeScoreBacktestRequest request,
@@ -588,7 +766,6 @@ public class RealtimeScoreBacktestServiceImpl implements RealtimeScoreBacktestSe
                 List<BacktestTradeDetail> matchedDetails = tradeDetails.stream()
                         .filter(detail -> detail.getRankNo() != null && detail.getRankNo() <= topK)
                         .filter(detail -> sameBps(detail.getCostBps(), costBps))
-                        .filter(detail -> detail.getNetReturnBps() != null)
                         .collect(Collectors.toList());
                 summaries.add(buildTopkSummary(taskId, topK, costBps, matchedDaily, matchedDetails));
             }
@@ -641,10 +818,26 @@ public class RealtimeScoreBacktestServiceImpl implements RealtimeScoreBacktestSe
                 .map(daily -> BigDecimal.valueOf(daily.getSelectedCount()))
                 .collect(Collectors.toList())));
 
+        // 统计新指标
+        summary.setCandidateCount(tradeDetails.size());
+        long boughtCount = tradeDetails.stream().filter(d -> Boolean.TRUE.equals(d.getBuyFilled())).count();
+        summary.setBoughtCount((int) boughtCount);
+        summary.setBuyFillRate(rate(boughtCount, tradeDetails.size()));
+
+        summary.setBuy3pctCount((int) tradeDetails.stream().filter(d -> "BUY_DROP_3PCT_AFTER_1435".equals(d.getBuyRule())).count());
+        summary.setBuy2pctCount((int) tradeDetails.stream().filter(d -> "BUY_DROP_2PCT_AFTER_1445".equals(d.getBuyRule())).count());
+        summary.setBuy1pctCount((int) tradeDetails.stream().filter(d -> "BUY_DROP_1PCT_AFTER_1455".equals(d.getBuyRule())).count());
+
+        summary.setSell3pctCount((int) tradeDetails.stream().filter(d -> "SELL_PROFIT_3PCT_BEFORE_0935".equals(d.getSellRule())).count());
+        summary.setSell2pctCount((int) tradeDetails.stream().filter(d -> "SELL_PROFIT_2PCT_BEFORE_0940".equals(d.getSellRule())).count());
+        summary.setSell1pctCount((int) tradeDetails.stream().filter(d -> "SELL_PROFIT_1PCT_BEFORE_0944".equals(d.getSellRule())).count());
+        summary.setForceSell0945Count((int) tradeDetails.stream().filter(d -> "FORCE_SELL_0945".equals(d.getSellRule())).count());
+
         long stockWinCount = tradeDetails.stream()
-                .filter(detail -> detail.getNetReturnBps().compareTo(BigDecimal.ZERO) > 0)
+                .filter(detail -> detail.getNetReturnBps() != null && detail.getNetReturnBps().compareTo(BigDecimal.ZERO) > 0)
                 .count();
-        summary.setStockWinRate(rate(stockWinCount, tradeDetails.size()));
+        long validStockCount = tradeDetails.stream().filter(d -> d.getNetReturnBps() != null).count();
+        summary.setStockWinRate(rate(stockWinCount, validStockCount));
         return summary;
     }
 
@@ -873,6 +1066,17 @@ public class RealtimeScoreBacktestServiceImpl implements RealtimeScoreBacktestSe
         result.setTotalReturnBps(summary.getTotalReturnBps());
         result.setMaxSingleDayLossBps(summary.getMaxSingleDayLossBps());
         result.setAvgSelectedCount(summary.getAvgSelectedCount());
+
+        result.setCandidateCount(summary.getCandidateCount());
+        result.setBoughtCount(summary.getBoughtCount());
+        result.setBuyFillRate(summary.getBuyFillRate());
+        result.setBuy3pctCount(summary.getBuy3pctCount());
+        result.setBuy2pctCount(summary.getBuy2pctCount());
+        result.setBuy1pctCount(summary.getBuy1pctCount());
+        result.setSell3pctCount(summary.getSell3pctCount());
+        result.setSell2pctCount(summary.getSell2pctCount());
+        result.setSell1pctCount(summary.getSell1pctCount());
+        result.setForceSell0945Count(summary.getForceSell0945Count());
         return result;
     }
 

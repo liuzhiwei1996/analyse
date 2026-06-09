@@ -6,10 +6,13 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.analyse.analysestock.analysis.entity.*;
 import org.analyse.analysestock.analysis.mapper.*;
 import org.analyse.analysestock.analysis.serivce.ImportService;
+import org.analyse.analysestock.analysis.vo.GenerationMissingDateItem;
+import org.analyse.analysestock.analysis.vo.GenerationMissingDateResponse;
 import org.analyse.analysestock.config.util.RestTemplateUtil;
 import org.analyse.analysestock.config.util.StockCodeUtil;
 import org.analyse.analysestock.realtimecandidate.calculator.CostCalculator;
@@ -39,6 +42,7 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -79,6 +83,9 @@ public class ImportServiceImpl implements ImportService {
 
     @Autowired
     private RealtimeCandidateScoreResultMapper realtimeCandidateScoreResultMapper;
+
+    @Autowired
+    private StockIntradayExecutionSnapshotMapper stockIntradayExecutionSnapshotMapper;
 
     @Autowired
     private RestTemplateUtil restTemplateUtil;
@@ -278,6 +285,7 @@ public class ImportServiceImpl implements ImportService {
                 stockDataDailyAll.setStockCode(stockCode);
             });
         }
+        setClosePrice(afterList, beforeList, stockDataDailies);
         ListUtils.sort(stockDataDailies, true, "tradeDate");
         LocalDate tradeDate = null;
         if (!StringUtils.isEmpty(dateStr)) {
@@ -285,7 +293,7 @@ public class ImportServiceImpl implements ImportService {
         }
         LocalDate missingDate = null;
         if (tradeDate == null) {
-            missingDate = tradingDateMapper.getNewsetTradingDate(LocalDate.now().plusDays(-1), 1);
+            missingDate = tradingDateMapper.getNewsetTradingDate(LocalDate.now().plusDays(-1));
         } else {
             missingDate = tradeDate;
         }
@@ -396,7 +404,7 @@ public class ImportServiceImpl implements ImportService {
             //当前交易日数据
             StockDataDailyAll current = stockDataDailies.get(j);
             LocalDate tradeDate2 = current.getTradeDate();
-            LocalDate lastDay = tradingDateMapper.findTradingDateSqlServerStockCode(up.getTradeDate(), 0, 1);
+            LocalDate lastDay = tradingDateMapper.findTradingDateSqlServerStockCode(up.getTradeDate(), 0);
             //下一个交易日小于当前交易日期
             if (lastDay.compareTo(tradeDate2) < 0) {
                 //上一个交易日无数据
@@ -418,7 +426,7 @@ public class ImportServiceImpl implements ImportService {
             LocalDate lastDate = lastStockDataDaily.getTradeDate();
             while (lastDate.compareTo(tradeDate) <= 0 && count == 200) {
                 //查询下一个交易日
-                lastDate = tradingDateMapper.findTradingDateSqlServerStockCode(lastDate, 0, 1);
+                lastDate = tradingDateMapper.findTradingDateSqlServerStockCode(lastDate, 0);
                 //上一个交易日无数据
                 StockDataDailyAll copyData = new StockDataDailyAll();
                 copyData.setStockCode(stockCode);
@@ -457,7 +465,7 @@ public class ImportServiceImpl implements ImportService {
         stockTailTradeSnapshotMapper.deleteByTradeDate(tradeDate);
         List<PubStockInfo> stockInfos = pubStockInfoMapper.selectList(null);
         if (CollectionUtils.isEmpty(stockInfos)) return;
-        LocalDate nextTradeDate = tradingDateMapper.findTradingDateSqlServerStockCode(tradeDate, 0, 1);
+        LocalDate nextTradeDate = tradingDateMapper.findTradingDateSqlServerStockCode(tradeDate, 0);
 
         List<CompletableFuture<StockTailTradeSnapshot>> futures = stockInfos.stream()
                 .map(stockInfo -> CompletableFuture.supplyAsync(() -> {
@@ -837,6 +845,100 @@ public class ImportServiceImpl implements ImportService {
         return records;
     }
 
+    @Override
+    public GenerationMissingDateResponse findMissingGenerationDates(LocalDate startDate, LocalDate endDate) {
+        if (startDate == null || endDate == null) {
+            throw new IllegalArgumentException("startDate and endDate are required");
+        }
+        if (endDate.isBefore(startDate)) {
+            throw new IllegalArgumentException("endDate cannot be before startDate");
+        }
+
+        List<LocalDate> tradeDates = findTradeDates(startDate, endDate);
+        Set<LocalDate> tailDates = findExistingDates(stockTailTradeSnapshotMapper, startDate, endDate, StockTailTradeSnapshot::getTradeDate);
+        Set<LocalDate> dailyFactorDates = findExistingDates(stockDailyFactorSnapshotMapper, startDate, endDate, StockDailyFactorSnapshot::getTradeDate);
+        Set<LocalDate> shortSampleDates = findExistingDates(stockShortSampleStatsMapper, startDate, endDate, StockShortSampleStats::getTradeDate);
+        Set<LocalDate> marketDates = findExistingDates(marketContextSnapshotMapper, startDate, endDate, MarketContextSnapshot::getTradeDate);
+        Set<LocalDate> sectorDates = findExistingDates(sectorContextSnapshotMapper, startDate, endDate, SectorContextSnapshot::getTradeDate);
+        Set<LocalDate> scoreDates = findExistingDates(realtimeCandidateScoreResultMapper, startDate, endDate, RealtimeCandidateScoreResult::getTradeDate);
+
+        List<GenerationMissingDateItem> items = new ArrayList<>();
+        List<LocalDate> missingFactorDates = new ArrayList<>();
+        List<LocalDate> missingScoreDates = new ArrayList<>();
+
+        for (LocalDate tradeDate : tradeDates) {
+            List<String> missingFactorItems = new ArrayList<>();
+            addMissingFactorItem(missingFactorItems, tailDates, tradeDate, "尾盘交易快照");
+            addMissingFactorItem(missingFactorItems, dailyFactorDates, tradeDate, "日K因子快照");
+            addMissingFactorItem(missingFactorItems, shortSampleDates, tradeDate, "短样本统计快照");
+            addMissingFactorItem(missingFactorItems, marketDates, tradeDate, "市场环境快照");
+            addMissingFactorItem(missingFactorItems, sectorDates, tradeDate, "板块环境快照");
+
+            boolean factorGenerated = missingFactorItems.isEmpty();
+            boolean scoreGenerated = scoreDates.contains(tradeDate);
+            if (!factorGenerated) {
+                missingFactorDates.add(tradeDate);
+            }
+            if (!scoreGenerated) {
+                missingScoreDates.add(tradeDate);
+            }
+
+            GenerationMissingDateItem item = new GenerationMissingDateItem();
+            item.setTradeDate(tradeDate);
+            item.setFactorGenerated(factorGenerated);
+            item.setScoreGenerated(scoreGenerated);
+            item.setMissingFactorItems(missingFactorItems);
+            items.add(item);
+        }
+
+        GenerationMissingDateResponse response = new GenerationMissingDateResponse();
+        response.setStartDate(startDate);
+        response.setEndDate(endDate);
+        response.setTradeDates(tradeDates);
+        response.setTradeDayCount(tradeDates.size());
+        response.setMissingFactorDates(missingFactorDates);
+        response.setMissingScoreDates(missingScoreDates);
+        response.setMissingFactorCount(missingFactorDates.size());
+        response.setMissingScoreCount(missingScoreDates.size());
+        response.setItems(items);
+        return response;
+    }
+
+    private List<LocalDate> findTradeDates(LocalDate startDate, LocalDate endDate) {
+        QueryWrapper<TradingDate> query = new QueryWrapper<>();
+        query.select("DISTINCT trading_date")
+                .ge("trading_date", startDate)
+                .le("trading_date", endDate)
+                .orderByAsc("trading_date");
+        return tradingDateMapper.selectList(query).stream()
+                .map(TradingDate::getTradingDate)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+    }
+
+    private <T> Set<LocalDate> findExistingDates(
+            BaseMapper<T> mapper,
+            LocalDate startDate,
+            LocalDate endDate,
+            Function<T, LocalDate> tradeDateGetter
+    ) {
+        QueryWrapper<T> query = new QueryWrapper<>();
+        query.select("trade_date")
+                .ge("trade_date", startDate)
+                .le("trade_date", endDate)
+                .groupBy("trade_date");
+        return mapper.selectList(query).stream()
+                .map(tradeDateGetter)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+    }
+
+    private void addMissingFactorItem(List<String> missingItems, Set<LocalDate> generatedDates, LocalDate tradeDate, String itemName) {
+        if (!generatedDates.contains(tradeDate)) {
+            missingItems.add(itemName);
+        }
+    }
+
     private void saveRealtimeCandidateScoreResults(LocalDate tradeDate, String stockCode, List<RealtimeCandidateScoreRecord> records) {
         if (StringUtils.hasText(stockCode)) {
             log.info("{} 单票评分查询不落库，stockCode={}", tradeDate, stockCode);
@@ -945,67 +1047,103 @@ public class ImportServiceImpl implements ImportService {
         return results;
     }
 
-    private List<RealtimeCandidateScoreRecord> calculateForSingleDate(String stockCode, LocalDate tradeDate) {
-        log.info("开始计算股票 {} 在 {} 的实时候选股评分", stockCode == null ? "ALL" : stockCode, tradeDate);
 
-        // 1. 获取基础信息
-        QueryWrapper<PubStockInfo> stockInfoQuery = new QueryWrapper<>();
-        if (stockCode != null) {
-            stockInfoQuery.eq("symbol", stockCode);
-        }
-        List<PubStockInfo> stockInfos = pubStockInfoMapper.selectList(stockInfoQuery);
-        if (CollectionUtils.isEmpty(stockInfos)) {
-            log.warn("未找到对应的股票基础信息: {}", stockCode);
-            return Collections.emptyList();
-        }
 
-        // 2. 获取分钟线的日期窗口 (最近21个交易日，相对于当前计算的 tradeDate)
-        // 注意：findByMinuteTradeDate() 目前可能是固定逻辑，可能需要传入 tradeDate
-        // 但根据现有逻辑，它返回的是库里最近的21天。
-        // 如果是回测所有历史交易日，findByMinuteTradeDate 可能需要调整。
-        List<LocalDate> minuteDates = tradingDateMapper.findByMinuteTradeDate();
-        if (CollectionUtils.isEmpty(minuteDates)) {
-            log.warn("未找到分钟线交易日期");
-            return Collections.emptyList();
+    @Override
+    public void prepareIntradayExecutionSnapshot(LocalDate tradeDate) {
+        log.info("开始准备日期 {} 的盘中执行快照数据", tradeDate);
+        stockIntradayExecutionSnapshotMapper.deleteByTradeDate(tradeDate);
+
+        // 1. 获取当天的所有股票分钟数据
+        LambdaQueryWrapper<StockMinuteData> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(StockMinuteData::getTradeDate, tradeDate);
+        List<StockMinuteData> allMinuteData = stockMinuteDataMapper.selectList(queryWrapper);
+        if (CollectionUtils.isEmpty(allMinuteData)) {
+            log.warn("日期 {} 没有分钟数据", tradeDate);
+            return;
         }
 
-        // 3. 获取分钟线数据
-        QueryWrapper<StockMinuteData> minuteQuery = new QueryWrapper<>();
-        minuteQuery.in("trade_date", minuteDates);
-        if (stockCode != null) {
-            // 注意：StockMinuteData.stockCode 是 Integer 还是 String? 
-            // 实体类中是 Integer.
-            try {
-                minuteQuery.eq("stock_code", Integer.parseInt(stockCode));
-            } catch (NumberFormatException e) {
-                log.error("股票代码格式错误: {}", stockCode);
-            }
+        // 按股票分组
+        Map<Integer, List<StockMinuteData>> stockGroup = allMinuteData.stream()
+                .collect(Collectors.groupingBy(StockMinuteData::getStockCode));
+
+        List<StockIntradayExecutionSnapshot> snapshots = new ArrayList<>();
+        LocalDateTime now = LocalDateTime.now();
+
+        for (Map.Entry<Integer, List<StockMinuteData>> entry : stockGroup.entrySet()) {
+            Integer stockCodeInt = entry.getKey();
+            String stockCode = String.format("%06d", stockCodeInt);
+            List<StockMinuteData> minuteList = entry.getValue();
+
+            StockIntradayExecutionSnapshot snapshot = new StockIntradayExecutionSnapshot();
+            snapshot.setStockCode(stockCode);
+            snapshot.setTradeDate(tradeDate);
+            snapshot.setValidFlag(true);
+            snapshot.setCreatedAt(now);
+
+            // T 日买入窗口判断
+            // 14:30 价格
+            minuteList.stream().filter(m -> m.getTime() == 1430).findFirst()
+                    .ifPresent(m -> snapshot.setPrice1430(m.getPrice()));
+
+            // 14:35-14:44 最低价
+            snapshot.setLow14351444(getMinLowPrice(minuteList, 1435, 1444));
+            // 14:45-14:54 最低价
+            snapshot.setLow14451454(getMinLowPrice(minuteList, 1445, 1454));
+            // 14:55-15:00 最低价
+            snapshot.setLow14551500(getMinLowPrice(minuteList, 1455, 1500));
+
+            // T+1 日卖出窗口判断 (注意：此方法是为 tradeDate 准备数据的)
+            // 09:30-09:35 最高价
+            snapshot.setHigh09300935(getMaxHighPrice(minuteList, 930, 935));
+            // 09:36-09:40 最高价
+            snapshot.setHigh09360940(getMaxHighPrice(minuteList, 936, 940));
+            // 09:41-09:44 最高价
+            snapshot.setHigh09410944(getMaxHighPrice(minuteList, 941, 944));
+            // 09:45 价格
+            minuteList.stream().filter(m -> m.getTime() == 945).findFirst()
+                    .ifPresent(m -> snapshot.setPrice0945(m.getPrice()));
+
+            snapshots.add(snapshot);
         }
-        List<StockMinuteData> minuteBars = stockMinuteDataMapper.selectList(minuteQuery);
 
-        // 4. 获取日K数据
-        QueryWrapper<StockDataDailyAll> dailyQuery = new QueryWrapper<>();
-        dailyQuery.ge("trade_date", tradeDate.minusYears(1));
-        dailyQuery.le("trade_date", tradeDate);
-        if (stockCode != null) {
-            dailyQuery.eq("stock_code", stockCode);
+        if (!snapshots.isEmpty()) {
+            ListUtils.splitListByCount(snapshots, 1000).forEach(stockIntradayExecutionSnapshotMapper::insertBatch);
+            log.info("日期 {} 的盘中执行快照数据准备完成，共 {} 条", tradeDate, snapshots.size());
         }
-        List<StockDataDailyAll> dailyBars = stockDataDailyAllMapper.selectList(dailyQuery);
+    }
 
-        // 5. 执行计算
-        RealtimeStrategyConfig strategyConfig = new RealtimeStrategyConfig();
-        CostConfig costConfig = new CostConfig();
+    private BigDecimal getMinLowPrice(List<StockMinuteData> minuteList, int startTime, int endTime) {
+        return minuteList.stream()
+                .filter(m -> m.getTime() >= startTime && m.getTime() <= endTime)
+                .map(StockMinuteData::getLowPrice)
+                .filter(Objects::nonNull)
+                .min(BigDecimal::compareTo)
+                .orElse(null);
+    }
 
-        List<RealtimeCandidateScoreRecord> results = scoreEngine.calculateWithEntities(
-                tradeDate,
-                dailyBars,
-                minuteBars,
-                stockInfos,
-                strategyConfig,
-                costConfig
-        );
+    private BigDecimal getMaxHighPrice(List<StockMinuteData> minuteList, int startTime, int endTime) {
+        return minuteList.stream()
+                .filter(m -> m.getTime() >= startTime && m.getTime() <= endTime)
+                .map(StockMinuteData::getHighPrice)
+                .filter(Objects::nonNull)
+                .max(BigDecimal::compareTo)
+                .orElse(null);
+    }
 
-        log.info("日期 {} 计算完成，共生成 {} 条评分记录", tradeDate, results.size());
-        return results;
+
+    private void setClosePrice( List<StockDataDailyAll> afterList, List<StockDataDailyAll> beforeList, List<StockDataDailyAll> stockDataDailies) {
+        Map<LocalDate, BigDecimal> afterMap = afterList.stream().collect(Collectors.toMap(item -> item.getTradeDate(), item -> item.getClose()));
+        Map<LocalDate, BigDecimal> beforeMap = beforeList.stream().collect(Collectors.toMap(item -> item.getTradeDate(), item -> item.getClose()));
+        //填充复权前复权后数据
+        ListUtils.sort(stockDataDailies, true, "tradeDate");
+
+        for (StockDataDailyAll stockDataDaily : stockDataDailies) {
+            BigDecimal afterClose = afterMap.get(stockDataDaily.getTradeDate());
+            BigDecimal beforeClose = beforeMap.get(stockDataDaily.getTradeDate());
+            stockDataDaily.setCloseForead((beforeClose == null || beforeClose.compareTo(BigDecimal.ZERO) == 0 ? stockDataDaily.getClose() : beforeClose));
+            stockDataDaily.setCloseBackad(afterClose);
+
+        }
     }
 }

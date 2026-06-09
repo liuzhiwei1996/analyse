@@ -92,10 +92,70 @@ public class BacktestTradeDetail {
     private BigDecimal buyPrice1430;
 
     /**
+     * 买入触发价。
+     */
+    @TableField("buy_trigger_price")
+    private BigDecimal buyTriggerPrice;
+
+    /**
+     * 实际买入价。
+     */
+    @TableField("buy_price")
+    private BigDecimal buyPrice;
+
+    /**
+     * 买入时间。
+     */
+    @TableField("buy_time")
+    private String buyTime;
+
+    /**
+     * 买入规则。
+     */
+    @TableField("buy_rule")
+    private String buyRule;
+
+    /**
+     * 是否买入成交。
+     */
+    @TableField("buy_filled")
+    private Boolean buyFilled;
+
+    /**
      * T+1 日 09:30-09:45 卖出 VWAP。
      */
     @TableField("sell_vwap_0930_0945")
     private BigDecimal sellVwap09300945;
+
+    /**
+     * 卖出触发价。
+     */
+    @TableField("sell_trigger_price")
+    private BigDecimal sellTriggerPrice;
+
+    /**
+     * 实际卖出价。
+     */
+    @TableField("sell_price")
+    private BigDecimal sellPrice;
+
+    /**
+     * 卖出时间。
+     */
+    @TableField("sell_time")
+    private String sellTime;
+
+    /**
+     * 卖出规则。
+     */
+    @TableField("sell_rule")
+    private String sellRule;
+
+    /**
+     * 是否卖出成交。
+     */
+    @TableField("sell_filled")
+    private Boolean sellFilled;
 
     /**
      * 单票毛收益，单位 bps。

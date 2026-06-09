@@ -85,6 +85,66 @@ public class BacktestTopkSummary {
     private BigDecimal avgSelectedCount;
 
     /**
+     * 候选股票总数。
+     */
+    @TableField("candidate_count")
+    private Integer candidateCount;
+
+    /**
+     * 实际买入股票总数。
+     */
+    @TableField("bought_count")
+    private Integer boughtCount;
+
+    /**
+     * 买入成交率。
+     */
+    @TableField("buy_fill_rate")
+    private BigDecimal buyFillRate;
+
+    /**
+     * 3% 档买入数量。
+     */
+    @TableField("buy_3pct_count")
+    private Integer buy3pctCount;
+
+    /**
+     * 2% 档买入数量。
+     */
+    @TableField("buy_2pct_count")
+    private Integer buy2pctCount;
+
+    /**
+     * 1% 档买入数量。
+     */
+    @TableField("buy_1pct_count")
+    private Integer buy1pctCount;
+
+    /**
+     * 3% 止盈卖出数量。
+     */
+    @TableField("sell_3pct_count")
+    private Integer sell3pctCount;
+
+    /**
+     * 2% 止盈卖出数量。
+     */
+    @TableField("sell_2pct_count")
+    private Integer sell2pctCount;
+
+    /**
+     * 1% 止盈卖出数量。
+     */
+    @TableField("sell_1pct_count")
+    private Integer sell1pctCount;
+
+    /**
+     * 09:45 强制卖出数量。
+     */
+    @TableField("force_sell_0945_count")
+    private Integer forceSell0945Count;
+
+    /**
      * 汇总记录创建时间。
      */
     @TableField("created_at")

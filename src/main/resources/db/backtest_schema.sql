@@ -14,6 +14,29 @@ CREATE TABLE IF NOT EXISTS realtime_candidate_score_result (
     KEY idx_score_trade_score (trade_date, strategy_version, valid_flag, final_score)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
+CREATE TABLE IF NOT EXISTS stock_tail_trade_snapshot (
+    stock_code VARCHAR(16) NOT NULL,
+    trade_date DATE NOT NULL,
+    price_1400 DECIMAL(18, 4) NULL,
+    price_1430 DECIMAL(18, 4) NULL,
+    high_before_1430 DECIMAL(18, 4) NULL,
+    low_before_1430 DECIMAL(18, 4) NULL,
+    tail_amount_1400_1430 DECIMAL(20, 4) NULL,
+    tail_volume_1400_1430 BIGINT NULL,
+    amount_before_1430 DECIMAL(20, 4) NULL,
+    volume_before_1430 BIGINT NULL,
+    sell_amount_0930_0945 DECIMAL(20, 4) NULL,
+    sell_volume_0930_0945 BIGINT NULL,
+    sell_vwap_0930_0945 DECIMAL(18, 4) NULL,
+    valid_flag TINYINT(1) NOT NULL DEFAULT 1,
+    invalid_reason VARCHAR(64) NULL,
+    created_at DATETIME NULL,
+    updated_at DATETIME NULL,
+    PRIMARY KEY (trade_date, stock_code),
+    KEY idx_tail_trade_valid (trade_date, valid_flag),
+    KEY idx_tail_stock_date (stock_code, trade_date)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
 CREATE TABLE IF NOT EXISTS backtest_task (
     task_id VARCHAR(64) NOT NULL,
     start_date DATE NOT NULL,
@@ -46,6 +69,16 @@ CREATE TABLE IF NOT EXISTS backtest_topk_summary (
     total_return_bps DECIMAL(18, 4) NOT NULL DEFAULT 0,
     max_single_day_loss_bps DECIMAL(18, 4) NOT NULL DEFAULT 0,
     avg_selected_count DECIMAL(10, 4) NOT NULL DEFAULT 0,
+    candidate_count INT NOT NULL DEFAULT 0,
+    bought_count INT NOT NULL DEFAULT 0,
+    buy_fill_rate DECIMAL(10, 4) NOT NULL DEFAULT 0,
+    buy_3pct_count INT NOT NULL DEFAULT 0,
+    buy_2pct_count INT NOT NULL DEFAULT 0,
+    buy_1pct_count INT NOT NULL DEFAULT 0,
+    sell_3pct_count INT NOT NULL DEFAULT 0,
+    sell_2pct_count INT NOT NULL DEFAULT 0,
+    sell_1pct_count INT NOT NULL DEFAULT 0,
+    force_sell_0945_count INT NOT NULL DEFAULT 0,
     created_at DATETIME NULL,
     PRIMARY KEY (id),
     UNIQUE KEY uk_backtest_topk_summary (task_id, top_k, cost_bps),
@@ -88,7 +121,17 @@ CREATE TABLE IF NOT EXISTS backtest_trade_detail (
     score DECIMAL(18, 6) NULL,
     confidence_level VARCHAR(32) NULL,
     buy_price_1430 DECIMAL(18, 4) NULL,
+    buy_trigger_price DECIMAL(18, 4) NULL,
+    buy_price DECIMAL(18, 4) NULL,
+    buy_time VARCHAR(16) NULL,
+    buy_rule VARCHAR(64) NULL,
+    buy_filled TINYINT(1) DEFAULT 0,
     sell_vwap_0930_0945 DECIMAL(18, 4) NULL,
+    sell_trigger_price DECIMAL(18, 4) NULL,
+    sell_price DECIMAL(18, 4) NULL,
+    sell_time VARCHAR(16) NULL,
+    sell_rule VARCHAR(64) NULL,
+    sell_filled TINYINT(1) DEFAULT 0,
     gross_return_bps DECIMAL(18, 4) NULL,
     cost_bps_value DECIMAL(10, 4) NULL,
     slippage_bps DECIMAL(10, 4) NULL,
@@ -100,4 +143,22 @@ CREATE TABLE IF NOT EXISTS backtest_trade_detail (
     KEY idx_backtest_detail_task_date (task_id, trade_date),
     KEY idx_backtest_detail_task_rank (task_id, cost_bps, trade_date, rank_no),
     KEY idx_backtest_detail_task_stock (task_id, stock_code)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
+CREATE TABLE IF NOT EXISTS stock_intraday_execution_snapshot (
+    stock_code VARCHAR(16) NOT NULL,
+    trade_date DATE NOT NULL,
+    price_1430 DECIMAL(18, 4) NULL,
+    low_1435_1444 DECIMAL(18, 4) NULL,
+    low_1445_1454 DECIMAL(18, 4) NULL,
+    low_1455_1500 DECIMAL(18, 4) NULL,
+    high_0930_0935 DECIMAL(18, 4) NULL,
+    high_0936_0940 DECIMAL(18, 4) NULL,
+    high_0941_0944 DECIMAL(18, 4) NULL,
+    price_0945 DECIMAL(18, 4) NULL,
+    valid_flag TINYINT(1) NOT NULL DEFAULT 1,
+    invalid_reason VARCHAR(64) NULL,
+    created_at DATETIME NULL,
+    updated_at DATETIME NULL,
+    PRIMARY KEY (trade_date, stock_code)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;

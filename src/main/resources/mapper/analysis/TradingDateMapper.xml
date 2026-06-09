@@ -5,8 +5,7 @@
     <select id="getNewsetTradingDate" resultType="java.time.LocalDate">
         SELECT trading_date
         FROM trading_date
-        WHERE market = #{market}
-          AND trading_date
+        WHERE trading_date
             &lt;= #{holdingDate}
         ORDER BY trading_date DESC LIMIT 1
     </select>
@@ -15,8 +14,7 @@
     <select id="findTradingDateSqlServerStockCode" resultType="java.time.LocalDate">
         SELECT trading_date
         FROM trading_date
-        WHERE market = #{market}
-          AND trading_date
+        WHERE   trading_date
             > #{holdingDate}
         ORDER BY trading_date ASC
             LIMIT #{num}, 1

@@ -1,5 +1,7 @@
 package org.analyse.analysestock.analysis.serivce;
 
+import org.analyse.analysestock.analysis.vo.GenerationMissingDateResponse;
+
 import java.time.LocalDate;
 
 /**
@@ -39,4 +41,8 @@ public interface ImportService {
     void prepareMarketContextSnapshot(LocalDate tradeDate);
 
     void prepareShortSampleStats(LocalDate tradeDate);
+
+    void prepareIntradayExecutionSnapshot(LocalDate tradeDate);
+
+    GenerationMissingDateResponse findMissingGenerationDates(LocalDate startDate, LocalDate endDate);
 }

@@ -92,6 +92,22 @@
         .result-search {
             width: min(320px, 100%);
         }
+        .batch-log {
+            max-height: 220px;
+            overflow: auto;
+            white-space: pre-wrap;
+            background: #0f172a;
+            color: #dbeafe;
+            border-radius: 10px;
+            padding: 12px 14px;
+            font-family: Consolas, "Liberation Mono", monospace;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        .batch-progress-label {
+            min-width: 120px;
+            text-align: right;
+        }
 
         /* 自定义表格滚动条 */
         .table-responsive::-webkit-scrollbar {
@@ -150,6 +166,64 @@
                         </button>
                     </div>
                 </form>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-calendar-range me-2"></i>按日期范围批量生成
+            </div>
+            <div class="card-body p-4">
+                <div class="row g-4 align-items-end">
+                    <div class="col-md-3">
+                        <label for="batchStartDate" class="form-label fw-bold">开始日期</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="bi bi-calendar-event"></i></span>
+                            <input type="date" class="form-control" id="batchStartDate">
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="batchEndDate" class="form-label fw-bold">结束日期</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="bi bi-calendar-check"></i></span>
+                            <input type="date" class="form-control" id="batchEndDate">
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-bold">生成内容</label>
+                        <div class="border rounded-3 px-3 py-2 bg-light">
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" id="batchGenerateSnapshot" checked>
+                                <label class="form-check-label" for="batchGenerateSnapshot">快照</label>
+                            </div>
+                            <div class="form-check form-check-inline">
+                                <input class="form-check-input" type="checkbox" id="batchGenerateScore" checked>
+                                <label class="form-check-label" for="batchGenerateScore">评分</label>
+                            </div>
+                        </div>
+                        <div class="form-text mt-2">评分会按全市场生成并入库</div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="d-grid gap-2">
+                            <button type="button" class="btn btn-outline-secondary py-2 fw-bold" id="btnCheckMissingDates">
+                                <i class="bi bi-search me-1"></i> 检测缺失日期
+                            </button>
+                            <button type="button" class="btn btn-warning py-2 fw-bold" id="btnBatchGenerate">
+                                <i class="bi bi-lightning-charge me-1"></i> 批量生成快照和评分
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <div class="d-flex align-items-center justify-content-between mb-2">
+                        <span class="text-muted small" id="batchProgressText">待开始</span>
+                        <span class="text-muted small batch-progress-label" id="batchProgressCount">0 / 0</span>
+                    </div>
+                    <div class="progress" style="height: 22px;">
+                        <div class="progress-bar progress-bar-striped" id="batchProgressBar" role="progressbar" style="width: 0%;">0%</div>
+                    </div>
+                    <div class="batch-log mt-3" id="batchGenerateLog">请选择日期范围后开始。系统会按日期顺序执行，非交易日或缺少行情数据会在日志中显示失败原因。</div>
+                </div>
             </div>
         </div>
 
@@ -225,6 +299,223 @@
     <script>
         let currentResults = [];
         let currentKeyword = '';
+
+        document.getElementById('btnCheckMissingDates').addEventListener('click', checkMissingGenerationDates);
+        document.getElementById('btnBatchGenerate').addEventListener('click', runBatchGenerate);
+
+        function appendBatchLog(message) {
+            const log = document.getElementById('batchGenerateLog');
+            const now = new Date().toLocaleTimeString();
+            const prefix = log.dataset.started === 'true' ? '\n' : '';
+            log.dataset.started = 'true';
+            log.textContent += `${prefix}[${now}] ${message}`;
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function resetBatchLog() {
+            const log = document.getElementById('batchGenerateLog');
+            log.dataset.started = 'false';
+            log.textContent = '';
+        }
+
+        function setBatchProgress(done, total, text) {
+            const percent = total === 0 ? 0 : Math.round((done / total) * 100);
+            const progressBar = document.getElementById('batchProgressBar');
+            document.getElementById('batchProgressText').textContent = text;
+            document.getElementById('batchProgressCount').textContent = `${done} / ${total}`;
+            progressBar.style.width = `${percent}%`;
+            progressBar.textContent = `${percent}%`;
+        }
+
+        function buildDateRange(startDateText, endDateText) {
+            const startDate = new Date(`${startDateText}T00:00:00`);
+            const endDate = new Date(`${endDateText}T00:00:00`);
+            const dates = [];
+
+            for (const date = new Date(startDate); date <= endDate; date.setDate(date.getDate() + 1)) {
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                dates.push(`${year}-${month}-${day}`);
+            }
+
+            return dates;
+        }
+
+        function isSuccessResponse(res) {
+            return res && (res.result === 1 || res.code === 200 || res.success === true);
+        }
+
+        async function postJson(url, requestData) {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestData)
+            });
+            const text = await response.text();
+            const res = text ? JSON.parse(text) : {};
+
+            if (!response.ok) {
+                throw new Error(res.msg || res.message || `HTTP ${response.status}`);
+            }
+
+            return res;
+        }
+
+        async function runBatchGenerate() {
+            const startDate = document.getElementById('batchStartDate').value;
+            const endDate = document.getElementById('batchEndDate').value;
+            const needSnapshot = document.getElementById('batchGenerateSnapshot').checked;
+            const needScore = document.getElementById('batchGenerateScore').checked;
+            const btn = document.getElementById('btnBatchGenerate');
+
+            if (!startDate || !endDate) {
+                alert('请选择开始日期和结束日期。');
+                return;
+            }
+
+            if (startDate > endDate) {
+                alert('开始日期不能晚于结束日期。');
+                return;
+            }
+
+            if (!needSnapshot && !needScore) {
+                alert('请至少选择生成快照或评分。');
+                return;
+            }
+
+            const dates = buildDateRange(startDate, endDate);
+            resetBatchLog();
+            setBatchProgress(0, dates.length, '批量任务准备中...');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 批量生成中...';
+
+            let successDays = 0;
+            let failedDays = 0;
+
+            for (let index = 0; index < dates.length; index++) {
+                const tradeDate = dates[index];
+                let daySuccess = true;
+                appendBatchLog(`开始处理 ${tradeDate}`);
+
+                if (needSnapshot) {
+                    try {
+                        const snapshotRes = await postJson('/anlysis/prepareSnapshots', { tradeDate });
+                        if (isSuccessResponse(snapshotRes)) {
+                            appendBatchLog(`${tradeDate} 快照生成成功`);
+                        } else {
+                            daySuccess = false;
+                            appendBatchLog(`${tradeDate} 快照生成失败：${snapshotRes.msg || snapshotRes.message || '未知错误'}`);
+                        }
+                    } catch (error) {
+                        daySuccess = false;
+                        appendBatchLog(`${tradeDate} 快照请求失败：${error.message}`);
+                    }
+                }
+
+                if (needScore) {
+                    try {
+                        // stockCode 传 null，确保后端按全市场评分并写入评分结果表。
+                        const scoreRes = await postJson('/anlysis/calculateCandidateScore', {
+                            stockCode: null,
+                            tradeDate
+                        });
+                        if (isSuccessResponse(scoreRes)) {
+                            const count = Array.isArray(scoreRes.data) ? scoreRes.data.length : 0;
+                            appendBatchLog(`${tradeDate} 评分生成成功，返回 ${count} 条`);
+                        } else {
+                            daySuccess = false;
+                            appendBatchLog(`${tradeDate} 评分生成失败：${scoreRes.msg || scoreRes.message || '未知错误'}`);
+                        }
+                    } catch (error) {
+                        daySuccess = false;
+                        appendBatchLog(`${tradeDate} 评分请求失败：${error.message}`);
+                    }
+                }
+
+                if (daySuccess) {
+                    successDays++;
+                } else {
+                    failedDays++;
+                }
+
+                setBatchProgress(index + 1, dates.length, `正在处理 ${tradeDate}`);
+            }
+
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-lightning-charge me-1"></i> 批量生成快照和评分';
+            setBatchProgress(dates.length, dates.length, `处理完成，成功 ${successDays} 天，失败 ${failedDays} 天`);
+            appendBatchLog(`批量任务完成：成功 ${successDays} 天，失败 ${failedDays} 天`);
+        }
+
+        async function checkMissingGenerationDates() {
+            const startDate = document.getElementById('batchStartDate').value;
+            const endDate = document.getElementById('batchEndDate').value;
+            const btn = document.getElementById('btnCheckMissingDates');
+
+            if (!startDate || !endDate) {
+                alert('请选择开始日期和结束日期。');
+                return;
+            }
+
+            if (startDate > endDate) {
+                alert('开始日期不能晚于结束日期。');
+                return;
+            }
+
+            resetBatchLog();
+            setBatchProgress(0, 0, '正在检测缺失日期...');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 检测中...';
+
+            try {
+                const res = await postJson('/anlysis/missingGenerationDates', { startDate, endDate });
+                if (!isSuccessResponse(res)) {
+                    appendBatchLog(`检测失败：${res.msg || res.message || '未知错误'}`);
+                    return;
+                }
+                renderMissingGenerationDates(res.data || {});
+            } catch (error) {
+                appendBatchLog(`检测请求失败：${error.message}`);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-search me-1"></i> 检测缺失日期';
+            }
+        }
+
+        function renderMissingGenerationDates(data) {
+            const tradeDayCount = data.tradeDayCount || 0;
+            const missingFactorDates = data.missingFactorDates || [];
+            const missingScoreDates = data.missingScoreDates || [];
+            const missingItems = (data.items || []).filter(item => !item.factorGenerated || !item.scoreGenerated);
+
+            setBatchProgress(tradeDayCount, tradeDayCount, `检测完成，共 ${tradeDayCount} 个交易日`);
+            appendBatchLog(`检测范围：${data.startDate || '-'} 至 ${data.endDate || '-'}`);
+            appendBatchLog(`交易日数量：${tradeDayCount}`);
+            appendBatchLog(`因子未生成日期 ${missingFactorDates.length} 天：${formatDateList(missingFactorDates)}`);
+            appendBatchLog(`评分报告未生成日期 ${missingScoreDates.length} 天：${formatDateList(missingScoreDates)}`);
+
+            if (missingItems.length === 0) {
+                appendBatchLog('范围内交易日的因子和评分报告都已生成。');
+                return;
+            }
+
+            appendBatchLog('缺失明细：');
+            missingItems.forEach(item => {
+                const parts = [];
+                if (!item.factorGenerated) {
+                    parts.push(`因子缺失：${(item.missingFactorItems || []).join('、') || '未知快照'}`);
+                }
+                if (!item.scoreGenerated) {
+                    parts.push('评分报告缺失');
+                }
+                appendBatchLog(`${item.tradeDate} ${parts.join('；')}`);
+            });
+        }
+
+        function formatDateList(dates) {
+            return dates.length ? dates.join('、') : '无';
+        }
 
         document.getElementById('btnPrepare').addEventListener('click', function() {
             const tradeDate = document.getElementById('tradeDate').value;

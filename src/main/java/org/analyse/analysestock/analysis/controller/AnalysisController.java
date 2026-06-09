@@ -3,6 +3,8 @@ package org.analyse.analysestock.analysis.controller;
 import lombok.extern.slf4j.Slf4j;
 import org.analyse.analysestock.analysis.api.AnalysisApi;
 import org.analyse.analysestock.analysis.serivce.ImportService;
+import org.analyse.analysestock.analysis.vo.GenerationMissingDateRequest;
+import org.analyse.analysestock.analysis.vo.GenerationMissingDateResponse;
 import org.analyse.analysestock.analysis.vo.StockInfoVo;
 import org.analyse.analysestock.config.ResultData;
 import org.analyse.analysestock.config.ResultUtil;
@@ -78,8 +80,18 @@ public class AnalysisController implements AnalysisApi {
         
         // 4. 生成市场环境和板块快照 (依赖步骤1)
         importService.prepareMarketContextSnapshot(tradeDate);
+
+        // 5. 生成执行窗口快照 (回测新策略用)
+        importService.prepareIntradayExecutionSnapshot(tradeDate);
         
         log.info("{} 的全套因子快照生成完成", tradeDate);
         return ResultUtil.success("快照生成成功");
+    }
+
+    @PostMapping("/missingGenerationDates")
+    public ResultData<GenerationMissingDateResponse> findMissingGenerationDates(@RequestBody GenerationMissingDateRequest request) {
+        LocalDate startDate = request == null ? null : request.getStartDate();
+        LocalDate endDate = request == null ? null : request.getEndDate();
+        return ResultUtil.success(importService.findMissingGenerationDates(startDate, endDate));
     }
 }
