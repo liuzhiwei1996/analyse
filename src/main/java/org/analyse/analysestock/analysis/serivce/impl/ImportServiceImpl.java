@@ -614,7 +614,7 @@ public class ImportServiceImpl implements ImportService {
                         snapshot.setDailyHigh20d(high20);
                         snapshot.setDailyLow20d(low20);
                         if (high20.compareTo(low20) > 0) {
-                            snapshot.setPosition20d(latest.getClose().subtract(low20).divide(high20.subtract(low20), 4, RoundingMode.HALF_UP));
+                            snapshot.setPosition20d(latest.getCloseForead().subtract(low20).divide(high20.subtract(low20), 4, RoundingMode.HALF_UP));
                         }
                     }
                     snapshot.setAvgAmount5d(calculateAvgAmount(dailyBars, 5));
@@ -639,8 +639,8 @@ public class ImportServiceImpl implements ImportService {
     }
 
     private BigDecimal calculateReturn(StockDataDailyAll current, StockDataDailyAll base) {
-        if (base.getClose() == null || base.getClose().compareTo(BigDecimal.ZERO) == 0) return BigDecimal.ZERO;
-        return current.getClose().subtract(base.getClose()).divide(base.getClose(), 4, RoundingMode.HALF_UP);
+        if (base.getCloseForead() == null || base.getCloseForead().compareTo(BigDecimal.ZERO) == 0) return BigDecimal.ZERO;
+        return current.getCloseForead().subtract(base.getCloseForead()).divide(base.getCloseForead(), 4, RoundingMode.HALF_UP);
     }
 
     private BigDecimal calculateAvgAmount(List<StockDataDailyAll> bars, int days) {

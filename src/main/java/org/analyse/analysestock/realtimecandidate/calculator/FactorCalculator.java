@@ -36,7 +36,7 @@ public class FactorCalculator {
             snapshot.setInvalidReason(InvalidReason.DATA_QUALITY_ISSUE);
             return snapshot;
         }
-        snapshot.setClosePrevious(prevDayK.getClose());
+        snapshot.setClosePrevious(prevDayK.getCloseForead());
 
         // 2. 提取 14:00 和 14:30 价格
         StockMinuteData min1400 = tMinuteBars.stream().filter(m -> m.getTime() != null && m.getTime() == 1400).findFirst().orElse(null);
@@ -84,7 +84,7 @@ public class FactorCalculator {
         snapshot.setTodayTailAmount(tailAmount);
 
         // 8.4 returnTo1430
-        snapshot.setReturnTo1430(p1430.divide(prevDayK.getClose(), 6, RoundingMode.HALF_UP).subtract(BigDecimal.ONE));
+        snapshot.setReturnTo1430(p1430.divide(prevDayK.getCloseForead(), 6, RoundingMode.HALF_UP).subtract(BigDecimal.ONE));
 
         return snapshot;
     }

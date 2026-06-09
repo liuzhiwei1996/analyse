@@ -25,8 +25,8 @@ public class DailyTrendCalculator {
 
         // return5d = close_T_minus_1 / close_T_minus_6 - 1
         if (history.size() >= 6) {
-            BigDecimal closeTminus1 = history.get(0).getClose();
-            BigDecimal closeTminus6 = history.get(5).getClose();
+            BigDecimal closeTminus1 = history.get(0).getCloseForead();
+            BigDecimal closeTminus6 = history.get(5).getCloseForead();
             if (closeTminus6.compareTo(BigDecimal.ZERO) > 0) {
                 snapshot.setReturn5d(closeTminus1.divide(closeTminus6, 6, RoundingMode.HALF_UP).subtract(BigDecimal.ONE));
             }
@@ -34,8 +34,8 @@ public class DailyTrendCalculator {
 
         // return20d = close_T_minus_1 / close_T_minus_21 - 1
         if (history.size() >= 21) {
-            BigDecimal closeTminus1 = history.get(0).getClose();
-            BigDecimal closeTminus21 = history.get(20).getClose();
+            BigDecimal closeTminus1 = history.get(0).getCloseForead();
+            BigDecimal closeTminus21 = history.get(20).getCloseForead();
             if (closeTminus21.compareTo(BigDecimal.ZERO) > 0) {
                 snapshot.setReturn20d(closeTminus1.divide(closeTminus21, 6, RoundingMode.HALF_UP).subtract(BigDecimal.ONE));
             }
@@ -53,8 +53,8 @@ public class DailyTrendCalculator {
         if (history.size() >= 21) {
             List<BigDecimal> returns = new ArrayList<>();
             for (int i = 0; i < 20; i++) {
-                BigDecimal c = history.get(i).getClose();
-                BigDecimal cp = history.get(i + 1).getClose();
+                BigDecimal c = history.get(i).getCloseForead();
+                BigDecimal cp = history.get(i + 1).getCloseForead();
                 if (cp.compareTo(BigDecimal.ZERO) > 0) {
                     returns.add(c.divide(cp, 6, RoundingMode.HALF_UP).subtract(BigDecimal.ONE));
                 }

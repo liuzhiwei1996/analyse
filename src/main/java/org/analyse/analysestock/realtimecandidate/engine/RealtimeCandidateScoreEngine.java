@@ -49,6 +49,7 @@ public class RealtimeCandidateScoreEngine {
             daily.setHighest(d.getHigh());
             daily.setLowest(d.getLow());
             daily.setClose(d.getClose());
+            daily.setCloseForead(d.getClose());  // 使用前复权收盘价进行计算
             daily.setAmount(d.getAmount());
             daily.setVolume(d.getVolume());
             daily.setClosePrevious(d.getClosePrevious());
