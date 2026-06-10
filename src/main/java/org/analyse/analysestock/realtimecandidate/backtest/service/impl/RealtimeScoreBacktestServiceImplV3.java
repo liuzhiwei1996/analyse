@@ -139,12 +139,12 @@ public class RealtimeScoreBacktestServiceImplV3 implements RealtimeScoreBacktest
     public List<BacktestTradeDetail> listDetails(String taskId, LocalDate tradeDate, Integer topK,
                                                   BigDecimal costBps, String stockCode) {
         getRequiredTask(taskId);
-        LambdaQueryWrapper<BacktestTradeDetail> query = new LambdaQueryWrapper<>();
-        query.eq(BacktestTradeDetail::getTaskId, taskId);
-        if (tradeDate != null) query.eq(BacktestTradeDetail::getTradeDate, tradeDate);
-        if (topK != null) query.le(BacktestTradeDetail::getRankNo, topK);
-        if (costBps != null) query.eq(BacktestTradeDetail::getCostBps, costBps);
-        if (StringUtils.hasText(stockCode)) query.eq(BacktestTradeDetail::getStockCode, stockCode);
+        com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<BacktestTradeDetail> query = new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<>();
+        query.eq("task_id", taskId);
+        if (tradeDate != null) query.eq("trade_date", tradeDate);
+        if (topK != null) query.le("rank_no", topK);
+        if (costBps != null) query.eq("cost_bps", costBps);
+        if (StringUtils.hasText(stockCode)) query.eq("stock_code", stockCode);
         query.orderByAsc("trade_date", "rank_no", "stock_code");
         return backtestTradeDetailMapper.selectList(query);
     }
