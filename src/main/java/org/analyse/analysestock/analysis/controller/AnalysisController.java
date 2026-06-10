@@ -8,6 +8,7 @@ import org.analyse.analysestock.analysis.vo.GenerationMissingDateResponse;
 import org.analyse.analysestock.analysis.vo.StockInfoVo;
 import org.analyse.analysestock.config.ResultData;
 import org.analyse.analysestock.config.ResultUtil;
+import org.analyse.analysestock.analysis.entity.RealtimeCandidateScoreResultV3;
 import org.analyse.analysestock.realtimecandidate.dto.RealtimeCandidateScoreRecord;
 import org.analyse.analysestock.analysis.vo.MissingStockDataItem;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -103,5 +104,35 @@ public class AnalysisController implements AnalysisApi {
             @RequestParam @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate startDate,
             @RequestParam @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate endDate) {
         return ResultUtil.success(importService.checkMissingData(stockCode, startDate, endDate));
+    }
+
+    // ==================== V3 接口 ====================
+
+    /**
+     * V3 计算实时候选股评分（REALTIME_CANDIDATE_EXECUTION_FIT_V3）。
+     */
+    @PostMapping("/calculateCandidateScoreV3")
+    public ResultData<List<RealtimeCandidateScoreResultV3>> calculateCandidateScoreV3(@RequestBody StockInfoVo stockInfoVo) {
+        return ResultUtil.success(importService.calculateRealtimeCandidateScoresV3(
+                stockInfoVo.getStockCode(), stockInfoVo.getTradeDate()));
+    }
+
+    /**
+     * V3 准备全套快照。
+     */
+    @PostMapping("/prepareSnapshotsV3")
+    public ResultData<String> prepareSnapshotsV3(@RequestBody StockInfoVo stockInfoVo) {
+        LocalDate tradeDate = stockInfoVo.getTradeDate();
+        if (tradeDate == null) {
+            tradeDate = LocalDate.now();
+        }
+        log.info("V3: 开始生成 {} 的全套因子快照", tradeDate);
+
+        importService.prepareTailTradeSnapshotV3(tradeDate);
+        importService.prepareShortSampleStatsV3(tradeDate);
+        importService.prepareMarketContextSnapshotV3(tradeDate);
+
+        log.info("V3: {} 的全套因子快照生成完成", tradeDate);
+        return ResultUtil.success("V3 快照生成成功");
     }
 }
