@@ -54,4 +54,15 @@
             resultType="org.analyse.analysestock.analysis.entity.StockDataDailyAll">
         select * from stock_data_daily_all where stock_code=#{stockCode} and trade_date&lt;=#{holdingDate} order by trade_date desc limit 1;
     </select>
+
+    <select id="findStockCodesWithDailyData" resultType="java.lang.String">
+        SELECT DISTINCT stock_code FROM stock_data_daily_all
+        WHERE trade_date BETWEEN #{startDate} AND #{endDate}
+    </select>
+
+    <select id="findTradeDatesWithDailyData" resultType="java.time.LocalDate">
+        SELECT DISTINCT trade_date FROM stock_data_daily_all
+        WHERE stock_code = #{stockCode}
+          AND trade_date BETWEEN #{startDate} AND #{endDate}
+    </select>
 </mapper>

@@ -9,6 +9,7 @@ import org.analyse.analysestock.analysis.vo.StockInfoVo;
 import org.analyse.analysestock.config.ResultData;
 import org.analyse.analysestock.config.ResultUtil;
 import org.analyse.analysestock.realtimecandidate.dto.RealtimeCandidateScoreRecord;
+import org.analyse.analysestock.analysis.vo.MissingStockDataItem;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
@@ -93,5 +94,14 @@ public class AnalysisController implements AnalysisApi {
         LocalDate startDate = request == null ? null : request.getStartDate();
         LocalDate endDate = request == null ? null : request.getEndDate();
         return ResultUtil.success(importService.findMissingGenerationDates(startDate, endDate));
+    }
+
+    @Override
+    @PostMapping("/checkMissingData")
+    public ResultData<List<MissingStockDataItem>> checkMissingData(
+            @RequestParam(required = false) String stockCode,
+            @RequestParam @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate startDate,
+            @RequestParam @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate endDate) {
+        return ResultUtil.success(importService.checkMissingData(stockCode, startDate, endDate));
     }
 }

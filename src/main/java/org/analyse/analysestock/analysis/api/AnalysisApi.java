@@ -34,4 +34,10 @@ public interface AnalysisApi {
 
     @PostMapping("/prepareSnapshots")
     ResultData<String> prepareSnapshots(StockInfoVo stockInfoVo);
+
+    @PostMapping("/checkMissingData")
+    ResultData<java.util.List<org.analyse.analysestock.analysis.vo.MissingStockDataItem>> checkMissingData(
+            @RequestParam(required = false) String stockCode,
+            @RequestParam @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate startDate,
+            @RequestParam @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate endDate);
 }

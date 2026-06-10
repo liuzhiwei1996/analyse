@@ -39,4 +39,15 @@
     <select id="findAllTradeDates" resultType="java.time.LocalDate">
         SELECT DISTINCT trade_date FROM stock_minute_data ORDER BY trade_date DESC
     </select>
+
+    <select id="findStockCodesWithMinuteData" resultType="java.lang.String">
+        SELECT DISTINCT stock_code FROM stock_minute_data
+        WHERE trade_date BETWEEN #{startDate} AND #{endDate}
+    </select>
+
+    <select id="findTradeDatesWithMinuteData" resultType="java.time.LocalDate">
+        SELECT DISTINCT trade_date FROM stock_minute_data
+        WHERE stock_code = #{stockCode}
+          AND trade_date BETWEEN #{startDate} AND #{endDate}
+    </select>
 </mapper>

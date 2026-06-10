@@ -13,6 +13,7 @@ import org.analyse.analysestock.analysis.mapper.*;
 import org.analyse.analysestock.analysis.serivce.ImportService;
 import org.analyse.analysestock.analysis.vo.GenerationMissingDateItem;
 import org.analyse.analysestock.analysis.vo.GenerationMissingDateResponse;
+import org.analyse.analysestock.analysis.vo.MissingStockDataItem;
 import org.analyse.analysestock.config.util.RestTemplateUtil;
 import org.analyse.analysestock.config.util.StockCodeUtil;
 import org.analyse.analysestock.realtimecandidate.calculator.CostCalculator;
@@ -268,9 +269,9 @@ public class ImportServiceImpl implements ImportService {
         List<StockDataDailyAll> stockDataDailies = new ArrayList<>();
         //获取上市日期
         LocalDate ipoDate = pubStockInfoMapper.findIpoDateByStockCode(stockCode);
-        LocalDate defaultIpoDate = LocalDate.parse("20200101", DateTimeFormatter.ofPattern("yyyyMMdd"));
+        LocalDate defaultIpoDate = LocalDate.parse("20250101", DateTimeFormatter.ofPattern("yyyyMMdd"));
         if (ipoDate == null || ipoDate.compareTo(defaultIpoDate) < 0) {
-            ipoDate = LocalDate.parse("20200101", DateTimeFormatter.ofPattern("yyyyMMdd"));
+            ipoDate = LocalDate.parse("20250101", DateTimeFormatter.ofPattern("yyyyMMdd"));
         }
         String startTime = ipoDate.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
         getRdsReferenceStockCodeAll(dailyCode, startTime, dateStr, stockDataDailies, count, 0);
@@ -1131,6 +1132,101 @@ public class ImportServiceImpl implements ImportService {
                 .orElse(null);
     }
 
+
+    @Override
+    public List<MissingStockDataItem> checkMissingData(String stockCode, LocalDate startDate, LocalDate endDate) {
+        List<MissingStockDataItem> result = new ArrayList<>();
+
+        // 1. 查询该日期范围内的所有交易日
+        LambdaQueryWrapper<TradingDate> dateWrapper = new LambdaQueryWrapper<>();
+        dateWrapper.select(TradingDate::getTradingDate)
+                .ge(TradingDate::getTradingDate, startDate)
+                .le(TradingDate::getTradingDate, endDate)
+                .eq(TradingDate::getIsDeleted, 0)
+                .orderByAsc(TradingDate::getTradingDate);
+        List<TradingDate> tradingDates = tradingDateMapper.selectList(dateWrapper);
+        List<LocalDate> allTradeDates = tradingDates.stream()
+                .map(TradingDate::getTradingDate)
+                .collect(Collectors.toList());
+
+        if (allTradeDates.isEmpty()) {
+            log.warn("日期范围 {} ~ {} 内无交易日", startDate, endDate);
+            return result;
+        }
+
+        // 2. 查询股票列表
+        List<PubStockInfo> allStocks;
+        if (CharSequenceUtil.isNotBlank(stockCode)) {
+            allStocks = pubStockInfoMapper.findByStockCode(stockCode);
+        } else {
+            allStocks = pubStockInfoMapper.selectList(null);
+        }
+
+        if (allStocks.isEmpty()) {
+            log.warn("未找到任何股票信息");
+            return result;
+        }
+
+        log.info("开始检测 {} 只股票在 {} ~ {} 范围内的数据缺失情况", allStocks.size(), startDate, endDate);
+
+        // 3. 查询已有日K和分时数据的股票代码集合（按日期分组）
+        Set<String> stocksWithDaily = new HashSet<>(stockDataDailyAllMapper.findStockCodesWithDailyData(startDate, endDate));
+        Set<String> stocksWithMinute = new HashSet<>(stockMinuteDataMapper.findStockCodesWithMinuteData(startDate, endDate));
+
+        // 4. 逐只股票检查
+        for (PubStockInfo stock : allStocks) {
+            String code = stock.getSymbol();
+
+            // 跳过已退市的股票
+            if (stock.getDelistDate() != null && stock.getDelistDate().isBefore(startDate)) {
+                continue;
+            }
+
+            // 跳过未上市的股票
+            if (stock.getListingDate() != null && stock.getListingDate().isAfter(endDate)) {
+                continue;
+            }
+
+            // 确定该股票实际应包含的交易日范围
+            LocalDate effectiveStart = startDate;
+            LocalDate effectiveEnd = endDate;
+            if (stock.getListingDate() != null && stock.getListingDate().isAfter(effectiveStart)) {
+                effectiveStart = stock.getListingDate();
+            }
+            if (stock.getDelistDate() != null && stock.getDelistDate().isBefore(effectiveEnd)) {
+                effectiveEnd = stock.getDelistDate();
+            }
+
+            // 获取该股票实际已有的日K和分时数据日期
+            Set<LocalDate> existingDailyDates = new HashSet<>(
+                    stockDataDailyAllMapper.findTradeDatesWithDailyData(code, effectiveStart, effectiveEnd));
+            Set<LocalDate> existingMinuteDates = new HashSet<>(
+                    stockMinuteDataMapper.findTradeDatesWithMinuteData(code, effectiveStart, effectiveEnd));
+
+            // 对每个交易日检查
+            for (LocalDate tradeDate : allTradeDates) {
+                if (tradeDate.isBefore(effectiveStart) || tradeDate.isAfter(effectiveEnd)) {
+                    continue;
+                }
+
+                boolean hasDaily = existingDailyDates.contains(tradeDate);
+                boolean hasMinute = existingMinuteDates.contains(tradeDate);
+
+                if (!hasDaily || !hasMinute) {
+                    MissingStockDataItem item = new MissingStockDataItem();
+                    item.setStockCode(code);
+                    item.setStockName(stock.getShortName());
+                    item.setTradeDate(tradeDate);
+                    item.setMissingDaily(!hasDaily);
+                    item.setMissingMinute(!hasMinute);
+                    result.add(item);
+                }
+            }
+        }
+
+        log.info("数据缺失检测完成，共发现 {} 条缺失记录", result.size());
+        return result;
+    }
 
     private void setClosePrice( List<StockDataDailyAll> afterList, List<StockDataDailyAll> beforeList, List<StockDataDailyAll> stockDataDailies) {
         Map<LocalDate, BigDecimal> afterMap = afterList.stream().collect(Collectors.toMap(item -> item.getTradeDate(), item -> item.getClose()));

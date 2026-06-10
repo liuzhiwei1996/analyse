@@ -34,4 +34,14 @@ public interface StockDataDailyAllMapper extends BaseMapper<StockDataDailyAll> {
      * @return
      */
     int deleteByStockCodeAndTradeDate(@Param("stockCode") String stockCode, @Param("tradeDate") LocalDate tradeDate);
+
+    /**
+     * 查询指定日期范围内有日K数据的股票代码列表
+     */
+    List<String> findStockCodesWithDailyData(@Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
+
+    /**
+     * 查询指定日期范围内某只股票有日K数据的日期列表
+     */
+    List<LocalDate> findTradeDatesWithDailyData(@Param("stockCode") String stockCode, @Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
 }

@@ -45,4 +45,13 @@ public interface ImportService {
     void prepareIntradayExecutionSnapshot(LocalDate tradeDate);
 
     GenerationMissingDateResponse findMissingGenerationDates(LocalDate startDate, LocalDate endDate);
+
+    /**
+     * 检测指定交易日范围内哪些股票缺失日K或分时数据
+     * @param stockCode 股票代码（可选，为空则检查全市场）
+     * @param startDate 开始日期
+     * @param endDate 结束日期
+     * @return 缺失数据条目列表
+     */
+    java.util.List<org.analyse.analysestock.analysis.vo.MissingStockDataItem> checkMissingData(String stockCode, LocalDate startDate, LocalDate endDate);
 }

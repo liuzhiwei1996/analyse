@@ -15,4 +15,14 @@ public interface StockMinuteDataMapper extends BaseMapper<StockMinuteData> {
     int insertBatch(@Param("list") List<StockMinuteData> list);
 
     List<LocalDate> findAllTradeDates();
+
+    /**
+     * 查询指定日期范围内有分时数据的股票代码列表
+     */
+    List<String> findStockCodesWithMinuteData(@Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
+
+    /**
+     * 查询指定日期范围内某只股票有分时数据的日期列表
+     */
+    List<LocalDate> findTradeDatesWithMinuteData(@Param("stockCode") String stockCode, @Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
 }

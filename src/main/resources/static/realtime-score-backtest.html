@@ -478,7 +478,13 @@
                         </div>
                         <div>
                             <label for="strategyVersion">策略版本</label>
-                            <input id="strategyVersion" value="V1">
+                            <div style="display:flex;gap:6px;align-items:center">
+                                <select id="strategyVersion" style="flex:1">
+                                    <option value="V1">V1 - 尾盘买入+次日VWAP卖出</option>
+                                    <option value="REALTIME_CANDIDATE_LIMIT_BUY_TAKE_PROFIT_V1">V2 - 分阶段低吸+止盈</option>
+                                </select>
+                                <button type="button" id="pinStrategyBtn" style="padding:4px 10px;font-size:13px;cursor:pointer;border:1px solid var(--line);border-radius:6px;background:var(--panel);white-space:nowrap" title="固定策略版本，刷新页面后仍保留">📌 固定</button>
+                            </div>
                         </div>
                         <div>
                             <label for="costBps">固定成本 bps</label>
@@ -685,6 +691,7 @@
 
     document.addEventListener('DOMContentLoaded', () => {
         initDates();
+        restoreSavedStrategy();
         bindEvents();
     });
 
@@ -708,6 +715,7 @@
         document.getElementById('exportExcelButton').addEventListener('click', exportExcel);
         document.getElementById('loadDailyButton').addEventListener('click', loadDaily);
         document.getElementById('loadDetailButton').addEventListener('click', loadDetail);
+        document.getElementById('pinStrategyBtn').addEventListener('click', pinStrategy);
         document.querySelectorAll('.tab').forEach(tab => {
             tab.addEventListener('click', () => switchTab(tab.dataset.tab));
         });
@@ -1211,6 +1219,29 @@
         document.getElementById('slippageBps').value = '10';
         document.getElementById('costScenarioBpsList').value = '0,10,25,50';
         document.getElementById('strategyVersion').value = 'V1';
+    }
+
+    const STORAGE_KEY = 'preferred_strategy_version';
+
+    /* Restore saved strategy version on page load. */
+    function restoreSavedStrategy() {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+            const select = document.getElementById('strategyVersion');
+            if (Array.from(select.options).some(o => o.value === saved)) {
+                select.value = saved;
+            }
+        }
+    }
+
+    /* Pin current strategy version to localStorage. */
+    function pinStrategy() {
+        const selected = document.getElementById('strategyVersion').value;
+        localStorage.setItem(STORAGE_KEY, selected);
+        const btn = document.getElementById('pinStrategyBtn');
+        const original = btn.textContent;
+        btn.textContent = '✓ 已固定';
+        setTimeout(() => { btn.textContent = original; }, 2000);
     }
 
     /* Update status pill. */

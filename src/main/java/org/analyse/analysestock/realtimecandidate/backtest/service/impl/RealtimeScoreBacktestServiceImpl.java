@@ -368,14 +368,15 @@ public class RealtimeScoreBacktestServiceImpl implements RealtimeScoreBacktestSe
      * 加载回测区间内的评分结果。
      *
      * <p>该方法不调用评分引擎，确保回测只基于历史已落库评分。</p>
+     * <p>策略版本（如 REALTIME_CANDIDATE_LIMIT_BUY_TAKE_PROFIT_V1）属于回测买卖规则，
+     * 评分数据统一按默认版本 V1 加载，不影响评分过滤。</p>
      */
     private List<RealtimeCandidateScoreResult> loadScores(RealtimeScoreBacktestRequest request) {
         LambdaQueryWrapper<RealtimeCandidateScoreResult> query = new LambdaQueryWrapper<>();
         query.ge(RealtimeCandidateScoreResult::getTradeDate, request.getStartDate())
                 .le(RealtimeCandidateScoreResult::getTradeDate, request.getEndDate());
-        if (StringUtils.hasText(request.getStrategyVersion())) {
-            query.eq(RealtimeCandidateScoreResult::getStrategyVersion, request.getStrategyVersion());
-        }
+        // 回测策略版本不用于过滤评分，评分统一加载默认版本
+        query.eq(RealtimeCandidateScoreResult::getStrategyVersion, DEFAULT_STRATEGY_VERSION);
         if (Boolean.TRUE.equals(request.getExcludeInvalid())) {
             query.eq(RealtimeCandidateScoreResult::getValidFlag, true);
         }
