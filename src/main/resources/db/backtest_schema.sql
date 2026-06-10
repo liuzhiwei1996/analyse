@@ -162,3 +162,10 @@ CREATE TABLE IF NOT EXISTS stock_intraday_execution_snapshot (
     updated_at DATETIME NULL,
     PRIMARY KEY (trade_date, stock_code)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
+
+-- V3 基线对照字段
+ALTER TABLE backtest_topk_summary
+    ADD COLUMN IF NOT EXISTS baseline_type VARCHAR(32) NULL COMMENT '基线类型: TOP_K / RANDOM / BOTTOM_K / MIDDLE_K',
+    ADD COLUMN IF NOT EXISTS random_iteration INT NULL COMMENT '随机迭代次数（仅RANDOM基线）',
+    ADD COLUMN IF NOT EXISTS sharpe_ratio DECIMAL(10,6) NULL COMMENT '年化夏普比率',
+    ADD COLUMN IF NOT EXISTS max_drawdown_bps DECIMAL(18,4) NULL COMMENT '最大回撤(bps)';

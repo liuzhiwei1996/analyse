@@ -23,6 +23,7 @@ import org.analyse.analysestock.realtimecandidate.config.RealtimeStrategyConfig;
 import org.analyse.analysestock.realtimecandidate.dto.RealtimeCandidateScoreRecord;
 import org.analyse.analysestock.realtimecandidate.dto.RealtimeFactorSnapshot;
 import org.analyse.analysestock.realtimecandidate.engine.RealtimeCandidateScoreEngine;
+import org.analyse.analysestock.realtimecandidate.engine.RealtimeCandidateScoreEngineV3;
 import org.analyse.analysestock.util.ListUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -100,6 +101,22 @@ public class ImportServiceImpl implements ImportService {
 
     @Autowired
     private RealtimeCandidateScoreEngine scoreEngine;
+
+    // ==================== V3 Mapper ====================
+    @Autowired
+    private RealtimeCandidateScoreResultV3Mapper realtimeCandidateScoreResultV3Mapper;
+
+    @Autowired
+    private StockTailTradeSnapshotV3Mapper stockTailTradeSnapshotV3Mapper;
+
+    @Autowired
+    private StockShortSampleStatsV3Mapper stockShortSampleStatsV3Mapper;
+
+    @Autowired
+    private MarketContextSnapshotV3Mapper marketContextSnapshotV3Mapper;
+
+    @Autowired
+    private SectorContextSnapshotV3Mapper sectorContextSnapshotV3Mapper;
 
     @Value("${constant.url.rds}")
     private String rdsUrl;
@@ -1241,5 +1258,112 @@ public class ImportServiceImpl implements ImportService {
             stockDataDaily.setCloseBackad(afterClose);
 
         }
+    }
+
+    // ==================== V3 方法 ====================
+
+    /**
+     * 计算 V3 实时候选股评分。
+     */
+    @Override
+    public java.util.List<RealtimeCandidateScoreResultV3> calculateRealtimeCandidateScoresV3(String stockCode, LocalDate tradeDate) {
+        RealtimeCandidateScoreEngineV3 v3Engine = new RealtimeCandidateScoreEngineV3();
+        RealtimeStrategyConfig strategyConfig = buildStrategyConfig();
+        CostConfig costConfig = buildCostConfig();
+
+        // 加载数据
+        List<PubStockInfo> stockInfos = loadStockInfos(stockCode);
+        if (CollectionUtils.isEmpty(stockInfos)) {
+            return Collections.emptyList();
+        }
+
+        LocalDate dataStartDate = tradeDate.minusDays(strategyConfig.getMinuteLookbackDays() + 30);
+        List<StockDataDailyAll> dailyBars = loadDailyBars(stockCode, dataStartDate, tradeDate);
+        List<StockMinuteData> minuteBars = loadMinuteBars(stockCode, dataStartDate, tradeDate);
+
+        return v3Engine.calculateWithEntities(tradeDate, dailyBars, minuteBars, stockInfos, strategyConfig, costConfig);
+    }
+
+    /**
+     * 准备 V3 增强尾盘快照。
+     */
+    @Override
+    public void prepareTailTradeSnapshotV3(LocalDate tradeDate) {
+        log.info("V3: 准备尾盘快照, tradeDate={}", tradeDate);
+        // TODO: 从分钟线数据生成增强快照并保存到 stock_tail_trade_snapshot_v3
+        // 这里需要读取 T 日和 T+1 日的分钟线来填充所有窗口数据
+    }
+
+    /**
+     * 准备 V3 短样本统计。
+     */
+    @Override
+    public void prepareShortSampleStatsV3(LocalDate tradeDate) {
+        log.info("V3: 准备短样本统计, tradeDate={}", tradeDate);
+        // TODO: 为每只股票计算基于分阶段买卖规则的历史短样本统计
+    }
+
+    /**
+     * 准备 V3 市场环境快照。
+     */
+    @Override
+    public void prepareMarketContextSnapshotV3(LocalDate tradeDate) {
+        log.info("V3: 准备市场环境快照, tradeDate={}", tradeDate);
+        // TODO: 计算全市场和板块级别的环境指标并保存
+    }
+
+    /**
+     * 构建策略配置。
+     */
+    private RealtimeStrategyConfig buildStrategyConfig() {
+        RealtimeStrategyConfig config = new RealtimeStrategyConfig();
+        // V3 配置使用默认值，后续可外部化
+        return config;
+    }
+
+    /**
+     * 构建成本配置。
+     */
+    private CostConfig buildCostConfig() {
+        CostConfig config = new CostConfig();
+        // V3 默认成本 25bps，后续可外部化
+        return config;
+    }
+
+    /**
+     * 加载股票基础信息。
+     */
+    private List<PubStockInfo> loadStockInfos(String stockCode) {
+        if (StringUtils.hasText(stockCode)) {
+            PubStockInfo info = pubStockInfoMapper.selectById(stockCode);
+            return info != null ? Collections.singletonList(info) : Collections.emptyList();
+        }
+        return pubStockInfoMapper.selectList(new LambdaQueryWrapper<>());
+    }
+
+    /**
+     * 加载日K数据。
+     */
+    private List<StockDataDailyAll> loadDailyBars(String stockCode, LocalDate startDate, LocalDate endDate) {
+        LambdaQueryWrapper<StockDataDailyAll> query = new LambdaQueryWrapper<>();
+        if (StringUtils.hasText(stockCode)) {
+            query.eq(StockDataDailyAll::getStockCode, stockCode);
+        }
+        query.ge(StockDataDailyAll::getTradeDate, startDate)
+                .le(StockDataDailyAll::getTradeDate, endDate);
+        return stockDataDailyAllMapper.selectList(query);
+    }
+
+    /**
+     * 加载分钟线数据。
+     */
+    private List<StockMinuteData> loadMinuteBars(String stockCode, LocalDate startDate, LocalDate endDate) {
+        LambdaQueryWrapper<StockMinuteData> query = new LambdaQueryWrapper<>();
+        if (StringUtils.hasText(stockCode)) {
+            query.eq(StockMinuteData::getStockCode, Integer.valueOf(stockCode));
+        }
+        query.ge(StockMinuteData::getTradeDate, startDate)
+                .le(StockMinuteData::getTradeDate, endDate);
+        return stockMinuteDataMapper.selectList(query);
     }
 }

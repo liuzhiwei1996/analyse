@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.analyse.analysestock.analysis.mapper.StockShortSampleStatsV3Mapper">
+
+    <insert id="insertBatch">
+        INSERT INTO stock_short_sample_stats_v3 (
+            stock_code, trade_date,
+            buy_fill_rate, buy_3pct_fill_rate, buy_2pct_fill_rate, buy_1pct_fill_rate, not_filled_rate,
+            take_profit_1pct_rate, take_profit_2pct_rate, take_profit_3pct_rate, force_sell_rate,
+            avg_net_return_bps, avg_gross_return_bps, avg_take_profit_return_bps, avg_force_sell_return_bps, max_loss_bps,
+            buy_3pct_avg_net_return_bps, buy_2pct_avg_net_return_bps, buy_1pct_avg_net_return_bps,
+            post_buy_drawdown_avg, force_sell_loss_rate,
+            raw_win_rate, adjusted_win_rate, sample_count,
+            created_at
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+                #{item.stockCode}, #{item.tradeDate},
+                #{item.buyFillRate}, #{item.buy3PctFillRate}, #{item.buy2PctFillRate}, #{item.buy1PctFillRate}, #{item.notFilledRate},
+                #{item.takeProfit1PctRate}, #{item.takeProfit2PctRate}, #{item.takeProfit3PctRate}, #{item.forceSellRate},
+                #{item.avgNetReturnBps}, #{item.avgGrossReturnBps}, #{item.avgTakeProfitReturnBps}, #{item.avgForceSellReturnBps}, #{item.maxLossBps},
+                #{item.buy3PctAvgNetReturnBps}, #{item.buy2PctAvgNetReturnBps}, #{item.buy1PctAvgNetReturnBps},
+                #{item.postBuyDrawdownAvg}, #{item.forceSellLossRate},
+                #{item.rawWinRate}, #{item.adjustedWinRate}, #{item.sampleCount},
+                #{item.createdAt}
+            )
+        </foreach>
+        ON DUPLICATE KEY UPDATE
+            buy_fill_rate = VALUES(buy_fill_rate), buy_3pct_fill_rate = VALUES(buy_3pct_fill_rate),
+            buy_2pct_fill_rate = VALUES(buy_2pct_fill_rate), buy_1pct_fill_rate = VALUES(buy_1pct_fill_rate),
+            not_filled_rate = VALUES(not_filled_rate),
+            take_profit_1pct_rate = VALUES(take_profit_1pct_rate), take_profit_2pct_rate = VALUES(take_profit_2pct_rate),
+            take_profit_3pct_rate = VALUES(take_profit_3pct_rate), force_sell_rate = VALUES(force_sell_rate),
+            avg_net_return_bps = VALUES(avg_net_return_bps), avg_gross_return_bps = VALUES(avg_gross_return_bps),
+            avg_take_profit_return_bps = VALUES(avg_take_profit_return_bps),
+            avg_force_sell_return_bps = VALUES(avg_force_sell_return_bps), max_loss_bps = VALUES(max_loss_bps),
+            buy_3pct_avg_net_return_bps = VALUES(buy_3pct_avg_net_return_bps),
+            buy_2pct_avg_net_return_bps = VALUES(buy_2pct_avg_net_return_bps),
+            buy_1pct_avg_net_return_bps = VALUES(buy_1pct_avg_net_return_bps),
+            post_buy_drawdown_avg = VALUES(post_buy_drawdown_avg), force_sell_loss_rate = VALUES(force_sell_loss_rate),
+            raw_win_rate = VALUES(raw_win_rate), adjusted_win_rate = VALUES(adjusted_win_rate),
+            sample_count = VALUES(sample_count)
+    </insert>
+
+</mapper>

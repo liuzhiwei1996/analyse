@@ -149,4 +149,28 @@ public class BacktestTopkSummary {
      */
     @TableField("created_at")
     private LocalDateTime createdAt;
+
+    /**
+     * 基线类型：TOP_K / RANDOM / BOTTOM_K / MIDDLE_K。
+     */
+    @TableField("baseline_type")
+    private String baselineType;
+
+    /**
+     * 随机迭代次数（仅 RANDOM 基线）。
+     */
+    @TableField("random_iteration")
+    private Integer randomIteration;
+
+    /**
+     * 年化夏普比率。
+     */
+    @TableField("sharpe_ratio")
+    private BigDecimal sharpeRatio;
+
+    /**
+     * 最大回撤，单位 bps。
+     */
+    @TableField("max_drawdown_bps")
+    private BigDecimal maxDrawdownBps;
 }
