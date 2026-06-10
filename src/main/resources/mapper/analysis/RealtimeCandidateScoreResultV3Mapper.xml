@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.analyse.analysestock.analysis.mapper.RealtimeCandidateScoreResultV3Mapper">
+
+    <insert id="insertBatch">
+        INSERT INTO realtime_candidate_score_result_v3 (
+            trade_date, stock_code, short_name, market, sector,
+            price_1400, price_1430, return_to_1430, tail_momentum, tail_amount_1400_1430,
+            tail_amount_ratio, intraday_position, relative_strength_1430, amount_before_1430,
+            return_5d, return_20d, volatility_20d, avg_amount_20d, avg_amplitude_20d, max_drop_20d, position_20d,
+            morning_high_return_avg, morning_high_return_median,
+            hit_1pct_rate, hit_2pct_rate, hit_3pct_rate, force_sell_rate, force_sell_avg_return_bps,
+            buy_fill_rate, buy_3pct_fill_rate, buy_2pct_fill_rate, buy_1pct_fill_rate,
+            buy_3pct_avg_net_return_bps, buy_2pct_avg_net_return_bps, buy_1pct_avg_net_return_bps, not_filled_rate,
+            post_buy_drawdown_avg, force_sell_loss_rate, max_loss_bps, liquidity_risk_score, gap_down_risk_score,
+            short_sample_count, short_win_rate, short_adjusted_win_rate,
+            short_avg_net_return_bps, short_avg_win_bps, short_avg_loss_bps, short_profit_loss_ratio,
+            expected_net_return_score, morning_breakout_score, buy_execution_fit_score,
+            tail_strength_score, sector_market_score, risk_control_score, short_sample_score,
+            market_breadth, market_return_1430, market_regime,
+            sector_strength, sector_breadth, sector_rank,
+            final_score, rank_no,
+            confidence_level, data_quality_flag, valid_flag, invalid_reason,
+            strategy_version, score_explanation, created_at
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+                #{item.tradeDate}, #{item.stockCode}, #{item.shortName}, #{item.market}, #{item.sector},
+                #{item.price1400}, #{item.price1430}, #{item.returnTo1430}, #{item.tailMomentum}, #{item.tailAmount14001430},
+                #{item.tailAmountRatio}, #{item.intradayPosition}, #{item.relativeStrength1430}, #{item.amountBefore1430},
+                #{item.return5d}, #{item.return20d}, #{item.volatility20d}, #{item.avgAmount20d}, #{item.avgAmplitude20d}, #{item.maxDrop20d}, #{item.position20d},
+                #{item.morningHighReturnAvg}, #{item.morningHighReturnMedian},
+                #{item.hit1PctRate}, #{item.hit2PctRate}, #{item.hit3PctRate}, #{item.forceSellRate}, #{item.forceSellAvgReturnBps},
+                #{item.buyFillRate}, #{item.buy3PctFillRate}, #{item.buy2PctFillRate}, #{item.buy1PctFillRate},
+                #{item.buy3PctAvgNetReturnBps}, #{item.buy2PctAvgNetReturnBps}, #{item.buy1PctAvgNetReturnBps}, #{item.notFilledRate},
+                #{item.postBuyDrawdownAvg}, #{item.forceSellLossRate}, #{item.maxLossBps}, #{item.liquidityRiskScore}, #{item.gapDownRiskScore},
+                #{item.shortSampleCount}, #{item.shortWinRate}, #{item.shortAdjustedWinRate},
+                #{item.shortAvgNetReturnBps}, #{item.shortAvgWinBps}, #{item.shortAvgLossBps}, #{item.shortProfitLossRatio},
+                #{item.expectedNetReturnScore}, #{item.morningBreakoutScore}, #{item.buyExecutionFitScore},
+                #{item.tailStrengthScore}, #{item.sectorMarketScore}, #{item.riskControlScore}, #{item.shortSampleScore},
+                #{item.marketBreadth}, #{item.marketReturn1430}, #{item.marketRegime},
+                #{item.sectorStrength}, #{item.sectorBreadth}, #{item.sectorRank},
+                #{item.finalScore}, #{item.rankNo},
+                #{item.confidenceLevel}, #{item.dataQualityFlag}, #{item.validFlag}, #{item.invalidReason},
+                #{item.strategyVersion}, #{item.scoreExplanation}, #{item.createdAt}
+            )
+        </foreach>
+        ON DUPLICATE KEY UPDATE
+            short_name = VALUES(short_name), market = VALUES(market), sector = VALUES(sector),
+            price_1400 = VALUES(price_1400), price_1430 = VALUES(price_1430), return_to_1430 = VALUES(return_to_1430),
+            tail_momentum = VALUES(tail_momentum), tail_amount_1400_1430 = VALUES(tail_amount_1400_1430),
+            tail_amount_ratio = VALUES(tail_amount_ratio), intraday_position = VALUES(intraday_position),
+            relative_strength_1430 = VALUES(relative_strength_1430), amount_before_1430 = VALUES(amount_before_1430),
+            return_5d = VALUES(return_5d), return_20d = VALUES(return_20d), volatility_20d = VALUES(volatility_20d),
+            avg_amount_20d = VALUES(avg_amount_20d), avg_amplitude_20d = VALUES(avg_amplitude_20d),
+            max_drop_20d = VALUES(max_drop_20d), position_20d = VALUES(position_20d),
+            morning_high_return_avg = VALUES(morning_high_return_avg), morning_high_return_median = VALUES(morning_high_return_median),
+            hit_1pct_rate = VALUES(hit_1pct_rate), hit_2pct_rate = VALUES(hit_2pct_rate), hit_3pct_rate = VALUES(hit_3pct_rate),
+            force_sell_rate = VALUES(force_sell_rate), force_sell_avg_return_bps = VALUES(force_sell_avg_return_bps),
+            buy_fill_rate = VALUES(buy_fill_rate), buy_3pct_fill_rate = VALUES(buy_3pct_fill_rate),
+            buy_2pct_fill_rate = VALUES(buy_2pct_fill_rate), buy_1pct_fill_rate = VALUES(buy_1pct_fill_rate),
+            buy_3pct_avg_net_return_bps = VALUES(buy_3pct_avg_net_return_bps),
+            buy_2pct_avg_net_return_bps = VALUES(buy_2pct_avg_net_return_bps),
+            buy_1pct_avg_net_return_bps = VALUES(buy_1pct_avg_net_return_bps), not_filled_rate = VALUES(not_filled_rate),
+            post_buy_drawdown_avg = VALUES(post_buy_drawdown_avg), force_sell_loss_rate = VALUES(force_sell_loss_rate),
+            max_loss_bps = VALUES(max_loss_bps), liquidity_risk_score = VALUES(liquidity_risk_score),
+            gap_down_risk_score = VALUES(gap_down_risk_score),
+            short_sample_count = VALUES(short_sample_count), short_win_rate = VALUES(short_win_rate),
+            short_adjusted_win_rate = VALUES(short_adjusted_win_rate),
+            short_avg_net_return_bps = VALUES(short_avg_net_return_bps),
+            short_avg_win_bps = VALUES(short_avg_win_bps), short_avg_loss_bps = VALUES(short_avg_loss_bps),
+            short_profit_loss_ratio = VALUES(short_profit_loss_ratio),
+            expected_net_return_score = VALUES(expected_net_return_score),
+            morning_breakout_score = VALUES(morning_breakout_score),
+            buy_execution_fit_score = VALUES(buy_execution_fit_score),
+            tail_strength_score = VALUES(tail_strength_score), sector_market_score = VALUES(sector_market_score),
+            risk_control_score = VALUES(risk_control_score), short_sample_score = VALUES(short_sample_score),
+            market_breadth = VALUES(market_breadth), market_return_1430 = VALUES(market_return_1430),
+            market_regime = VALUES(market_regime), sector_strength = VALUES(sector_strength),
+            sector_breadth = VALUES(sector_breadth), sector_rank = VALUES(sector_rank),
+            final_score = VALUES(final_score), rank_no = VALUES(rank_no),
+            confidence_level = VALUES(confidence_level), data_quality_flag = VALUES(data_quality_flag),
+            valid_flag = VALUES(valid_flag), invalid_reason = VALUES(invalid_reason),
+            score_explanation = VALUES(score_explanation), created_at = VALUES(created_at)
+    </insert>
+
+</mapper>

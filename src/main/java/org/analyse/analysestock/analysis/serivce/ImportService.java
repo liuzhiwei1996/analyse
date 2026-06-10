@@ -54,4 +54,26 @@ public interface ImportService {
      * @return 缺失数据条目列表
      */
     java.util.List<org.analyse.analysestock.analysis.vo.MissingStockDataItem> checkMissingData(String stockCode, LocalDate startDate, LocalDate endDate);
+
+    // ==================== V3 方法 ====================
+
+    /**
+     * 计算 V3 实时候选股评分。
+     */
+    java.util.List<org.analyse.analysestock.analysis.entity.RealtimeCandidateScoreResultV3> calculateRealtimeCandidateScoresV3(String stockCode, LocalDate tradeDate);
+
+    /**
+     * 准备 V3 增强尾盘快照。
+     */
+    void prepareTailTradeSnapshotV3(LocalDate tradeDate);
+
+    /**
+     * 准备 V3 短样本统计。
+     */
+    void prepareShortSampleStatsV3(LocalDate tradeDate);
+
+    /**
+     * 准备 V3 市场环境快照。
+     */
+    void prepareMarketContextSnapshotV3(LocalDate tradeDate);
 }
