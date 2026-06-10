@@ -130,7 +130,15 @@
     <div class="container">
         <div class="page-header">
             <h2 class="m-0"><i class="bi bi-graph-up-arrow me-2"></i>实时候选股评分系统</h2>
-            <div class="text-muted small">策略版本: V1.0</div>
+            <div class="d-flex align-items-center gap-3">
+                <div class="btn-group" role="group" id="strategyToggle">
+                    <input type="radio" class="btn-check" name="strategyVersion" id="strategyV2" value="V2" checked>
+                    <label class="btn btn-outline-secondary btn-sm" for="strategyV2">V2 尾盘动量</label>
+                    <input type="radio" class="btn-check" name="strategyVersion" id="strategyV3" value="V3">
+                    <label class="btn btn-outline-primary btn-sm" for="strategyV3">V3 交易适配</label>
+                </div>
+                <div class="text-muted small" id="strategyLabel">当前策略: V2</div>
+            </div>
         </div>
         
         <div class="card">
@@ -300,6 +308,65 @@
         let currentResults = [];
         let currentKeyword = '';
 
+        function getStrategyVersion() {
+            const v3Radio = document.getElementById('strategyV3');
+            return v3Radio && v3Radio.checked ? 'V3' : 'V2';
+        }
+
+        function isV3() {
+            return getStrategyVersion() === 'V3';
+        }
+
+        // 策略切换时更新标签和表格头
+        document.querySelectorAll('input[name="strategyVersion"]').forEach(radio => {
+            radio.addEventListener('change', function() {
+                document.getElementById('strategyLabel').textContent = '当前策略: ' + this.value;
+                // 清空结果
+                document.getElementById('resultArea').style.display = 'none';
+                currentResults = [];
+                updateTableHeader(this.value);
+            });
+        });
+
+        function updateTableHeader(version) {
+            const thead = document.querySelector('#resultTable thead tr');
+            if (version === 'V3') {
+                thead.innerHTML = `
+                    <th>交易日期</th>
+                    <th>代码</th>
+                    <th>简称</th>
+                    <th>板块</th>
+                    <th>14:30价格</th>
+                    <th>尾盘动量</th>
+                    <th>日内位置</th>
+                    <th>振幅20d</th>
+                    <th>早盘冲高</th>
+                    <th>买入适配</th>
+                    <th>预期净收益</th>
+                    <th>风险控制</th>
+                    <th>总评分</th>
+                    <th>排名</th>
+                    <th>置信度</th>
+                    <th>状态</th>
+                `;
+            } else {
+                thead.innerHTML = `
+                    <th>交易日期</th>
+                    <th>代码</th>
+                    <th>简称</th>
+                    <th>板块/行业</th>
+                    <th>14:30价格</th>
+                    <th>尾盘动量</th>
+                    <th>日内位置</th>
+                    <th>短样本胜率</th>
+                    <th>总评分</th>
+                    <th>排名</th>
+                    <th>置信度</th>
+                    <th>状态</th>
+                `;
+            }
+        }
+
         document.getElementById('btnCheckMissingDates').addEventListener('click', checkMissingGenerationDates);
         document.getElementById('btnBatchGenerate').addEventListener('click', runBatchGenerate);
 
@@ -400,7 +467,8 @@
 
                 if (needSnapshot) {
                     try {
-                        const snapshotRes = await postJson('/anlysis/prepareSnapshots', { tradeDate });
+                        const snapshotUrl = isV3() ? '/anlysis/prepareSnapshotsV3' : '/anlysis/prepareSnapshots';
+                        const snapshotRes = await postJson(snapshotUrl, { tradeDate });
                         if (isSuccessResponse(snapshotRes)) {
                             appendBatchLog(`${tradeDate} 快照生成成功`);
                         } else {
@@ -415,8 +483,9 @@
 
                 if (needScore) {
                     try {
+                        const scoreUrl = isV3() ? '/anlysis/calculateCandidateScoreV3' : '/anlysis/calculateCandidateScore';
                         // stockCode 传 null，确保后端按全市场评分并写入评分结果表。
-                        const scoreRes = await postJson('/anlysis/calculateCandidateScore', {
+                        const scoreRes = await postJson(scoreUrl, {
                             stockCode: null,
                             tradeDate
                         });
@@ -520,11 +589,12 @@
         document.getElementById('btnPrepare').addEventListener('click', function() {
             const tradeDate = document.getElementById('tradeDate').value;
             const btn = document.getElementById('btnPrepare');
+            const snapshotUrl = isV3() ? '/anlysis/prepareSnapshotsV3' : '/anlysis/prepareSnapshots';
 
             btn.disabled = true;
             btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 生成中...';
 
-            fetch('/anlysis/prepareSnapshots', {
+            fetch(snapshotUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ tradeDate: tradeDate || null })
@@ -568,7 +638,9 @@
             document.getElementById('resultSearchInput').value = '';
             updateResultCount(0);
 
-            fetch('/anlysis/calculateCandidateScore', {
+            const scoreUrl = isV3() ? '/anlysis/calculateCandidateScoreV3' : '/anlysis/calculateCandidateScore';
+
+            fetch(scoreUrl, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -642,42 +714,72 @@
             body.innerHTML = '';
 
             if (!data || data.length === 0) {
-                body.innerHTML = '<tr><td colspan="12" class="text-center text-muted py-4">未匹配到股票代码或简称</td></tr>';
+                const colSpan = isV3() ? 16 : 12;
+                body.innerHTML = `<tr><td colspan="${colSpan}" class="text-center text-muted py-4">未匹配到股票代码或简称</td></tr>`;
                 updateResultCount(0);
                 return;
             }
 
             data.forEach(item => {
                 const tr = document.createElement('tr');
-                
+
                 // 评分着色
                 let scoreClass = 'score-low';
-                if (item.finalScore >= 80) scoreClass = 'score-high';
-                else if (item.finalScore >= 60) scoreClass = 'score-mid';
+                const finalScore = item.finalScore || 0;
+                if (finalScore >= 80) scoreClass = 'score-high';
+                else if (finalScore >= 60) scoreClass = 'score-mid';
 
                 // 置信度标签
                 let confBadge = 'bg-secondary';
-                if (item.confidenceLevel === 'HIGH') confBadge = 'bg-success';
-                else if (item.confidenceLevel === 'MEDIUM') confBadge = 'bg-info';
+                const confLevel = item.confidenceLevel || '';
+                if (confLevel.includes('HIGH')) confBadge = 'bg-success';
+                else if (confLevel.includes('MEDIUM')) confBadge = 'bg-info';
 
-                tr.innerHTML = `
-                    <td class="text-nowrap">${item.tradeDate}</td>
-                    <td class="fw-bold">${item.stockCode}</td>
-                    <td>${item.shortName || '-'}</td>
-                    <td><small class="text-muted">${item.sector || item.market || '-'}</small></td>
-                    <td>${item.price1430 ? item.price1430.toFixed(2) : '-'}</td>
-                    <td>${item.tailMomentum ? (item.tailMomentum * 100).toFixed(2) + '%' : '-'}</td>
-                    <td>${item.intradayPosition ? (item.intradayPosition * 100).toFixed(2) + '%' : '-'}</td>
-                    <td>${item.shortWinRate ? (item.shortWinRate * 100).toFixed(1) + '%' : '-'}</td>
-                    <td class="${scoreClass} fs-5">${formatFinalScore(item.finalScore)}</td>
-                    <td><span class="badge bg-light text-dark border">${item.rankNo || '-'}</span></td>
-                    <td><span class="badge ${confBadge}">${item.confidenceLevel || '-'}</span></td>
-                    <td>
-                        ${item.validFlag 
-                            ? '<span class="badge badge-success"><i class="bi bi-check-circle me-1"></i>有效</span>' 
-                            : '<span class="badge badge-danger" data-bs-toggle="tooltip" title="'+(item.invalidReason||'数据不足')+'"><i class="bi bi-x-circle me-1"></i>无效</span>'}
-                    </td>
-                `;
+                if (isV3()) {
+                    // V3 结果列：更多评分维度
+                    tr.innerHTML = `
+                        <td class="text-nowrap">${item.tradeDate || '-'}</td>
+                        <td class="fw-bold">${item.stockCode || '-'}</td>
+                        <td>${item.shortName || '-'}</td>
+                        <td><small class="text-muted">${item.sector || item.market || '-'}</small></td>
+                        <td>${item.price1430 != null ? Number(item.price1430).toFixed(2) : '-'}</td>
+                        <td>${item.tailMomentum != null ? (item.tailMomentum * 100).toFixed(2) + '%' : '-'}</td>
+                        <td>${item.intradayPosition != null ? (item.intradayPosition * 100).toFixed(2) + '%' : '-'}</td>
+                        <td>${item.avgAmplitude20d != null ? (item.avgAmplitude20d * 100).toFixed(2) + '%' : '-'}</td>
+                        <td>${item.morningBreakoutScore != null ? (item.morningBreakoutScore * 100).toFixed(1) : '-'}</td>
+                        <td>${item.buyExecutionFitScore != null ? (item.buyExecutionFitScore * 100).toFixed(1) : '-'}</td>
+                        <td>${item.expectedNetReturnScore != null ? (item.expectedNetReturnScore * 100).toFixed(1) : '-'}</td>
+                        <td>${item.riskControlScore != null ? (item.riskControlScore * 100).toFixed(1) : '-'}</td>
+                        <td class="${scoreClass} fs-5">${formatFinalScore(item.finalScore)}</td>
+                        <td><span class="badge bg-light text-dark border">${item.rankNo || '-'}</span></td>
+                        <td><span class="badge ${confBadge}">${item.confidenceLevel || '-'}</span></td>
+                        <td>
+                            ${item.validFlag
+                                ? '<span class="badge badge-success"><i class="bi bi-check-circle me-1"></i>有效</span>'
+                                : '<span class="badge badge-danger" data-bs-toggle="tooltip" title="'+(item.invalidReason||'数据不足')+'"><i class="bi bi-x-circle me-1"></i>无效</span>'}
+                        </td>
+                    `;
+                } else {
+                    // V2 结果列
+                    tr.innerHTML = `
+                        <td class="text-nowrap">${item.tradeDate || '-'}</td>
+                        <td class="fw-bold">${item.stockCode || '-'}</td>
+                        <td>${item.shortName || '-'}</td>
+                        <td><small class="text-muted">${item.sector || item.market || '-'}</small></td>
+                        <td>${item.price1430 != null ? Number(item.price1430).toFixed(2) : '-'}</td>
+                        <td>${item.tailMomentum != null ? (item.tailMomentum * 100).toFixed(2) + '%' : '-'}</td>
+                        <td>${item.intradayPosition != null ? (item.intradayPosition * 100).toFixed(2) + '%' : '-'}</td>
+                        <td>${item.shortWinRate != null ? (item.shortWinRate * 100).toFixed(1) + '%' : '-'}</td>
+                        <td class="${scoreClass} fs-5">${formatFinalScore(item.finalScore)}</td>
+                        <td><span class="badge bg-light text-dark border">${item.rankNo || '-'}</span></td>
+                        <td><span class="badge ${confBadge}">${item.confidenceLevel || '-'}</span></td>
+                        <td>
+                            ${item.validFlag
+                                ? '<span class="badge badge-success"><i class="bi bi-check-circle me-1"></i>有效</span>'
+                                : '<span class="badge badge-danger" data-bs-toggle="tooltip" title="'+(item.invalidReason||'数据不足')+'"><i class="bi bi-x-circle me-1"></i>无效</span>'}
+                        </td>
+                    `;
+                }
                 body.appendChild(tr);
             });
             
