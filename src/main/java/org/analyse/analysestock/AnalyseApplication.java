@@ -11,7 +11,14 @@ import org.springframework.retry.annotation.EnableRetry;
 @MapperScan(
         basePackages = {
                 "org.analyse.analysestock.af10product.mapper",
-                "org.analyse.analysestock.analysis.mapper"
+                "org.analyse.analysestock.analysis.mapper",
+                "org.analyse.analysestock.strategy.market.mapper",
+                "org.analyse.analysestock.strategy.filter.mapper",
+                "org.analyse.analysestock.strategy.portfolio.mapper",
+                "org.analyse.analysestock.strategy.execution.mapper",
+                "org.analyse.analysestock.strategy.mapper",
+                "org.analyse.analysestock.monitor.mapper",
+                "org.analyse.analysestock.risk.mapper"
         },
         nameGenerator = FullyQualifiedAnnotationBeanNameGenerator.class
 )

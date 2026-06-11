@@ -3,839 +3,162 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>A股尾盘策略评分系统</title>
-    <!-- 使用更现代的字体和图标 -->
+    <title>稳健短线策略系统</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
     <style>
-        :root {
-            --primary-color: #2c3e50;
-            --accent-color: #3498db;
+        body {
+            background: #f6f8fb;
+            color: #1f2937;
+            font-family: "Microsoft YaHei", Arial, sans-serif;
+            padding: 32px 0;
         }
-        body { 
-            padding-top: 30px; 
-            background-color: #f4f7f6; 
-            font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
-            color: #333;
+        .container { max-width: 1080px; }
+        .hero {
+            background: linear-gradient(135deg, #0f172a, #2563eb);
+            border-radius: 18px;
+            color: #fff;
+            padding: 34px;
+            margin-bottom: 26px;
         }
-        .container { max-width: 1400px; }
-        .page-header {
-            margin-bottom: 30px;
-            border-bottom: 2px solid var(--accent-color);
-            padding-bottom: 15px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .card { 
+        .card {
             border: none;
-            border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); 
-            margin-bottom: 25px;
-            transition: transform 0.2s;
+            border-radius: 16px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+            margin-bottom: 22px;
         }
-        .card-header {
-            background-color: white;
-            border-bottom: 1px solid #eee;
-            font-weight: bold;
-            color: var(--primary-color);
-            padding: 15px 20px;
-            border-radius: 12px 12px 0 0 !important;
-        }
-        .table-container { 
-            background: white; 
-            border-radius: 12px; 
-            padding: 0; 
-            overflow: hidden;
-        }
-        .table { margin-bottom: 0; }
-        .table thead {
-            background-color: #f8f9fa;
-        }
-        .table th {
-            font-weight: 600;
-            color: #555;
-            border-top: none;
-            white-space: nowrap;
-        }
-        .loading { 
-            display: none; 
-            text-align: center; 
-            padding: 40px; 
-            background: white;
-            border-radius: 12px;
-            margin-bottom: 20px;
-        }
-        .score-high { color: #e74c3c; font-weight: bold; }
-        .score-mid { color: #f39c12; font-weight: bold; }
-        .score-low { color: #95a5a6; }
-        
-        .badge-success { background-color: #2ecc71; }
-        .badge-danger { background-color: #e74c3c; }
-        
-        .sticky-table-header {
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
-        
-        .form-control:focus, .btn:focus {
-            box-shadow: 0 0 0 0.25rem rgba(52, 152, 219, 0.25);
-        }
-        
-        .btn-primary { background-color: var(--accent-color); border-color: var(--accent-color); }
-        .btn-primary:hover { background-color: #2980b9; border-color: #2980b9; }
-
-        .result-toolbar {
-            gap: 10px;
-        }
-        .result-search {
-            width: min(320px, 100%);
-        }
-        .batch-log {
-            max-height: 220px;
-            overflow: auto;
-            white-space: pre-wrap;
+        .result-box {
             background: #0f172a;
             color: #dbeafe;
-            border-radius: 10px;
-            padding: 12px 14px;
-            font-family: Consolas, "Liberation Mono", monospace;
-            font-size: 13px;
-            line-height: 1.6;
-        }
-        .batch-progress-label {
-            min-width: 120px;
-            text-align: right;
-        }
-
-        /* 自定义表格滚动条 */
-        .table-responsive::-webkit-scrollbar {
-            height: 8px;
-        }
-        .table-responsive::-webkit-scrollbar-thumb {
-            background: #ccc;
-            border-radius: 4px;
-        }
-
-        @media (max-width: 768px) {
-            .result-toolbar,
-            .result-search {
-                width: 100%;
-            }
+            border-radius: 12px;
+            min-height: 88px;
+            white-space: pre-wrap;
+            font-family: Consolas, monospace;
+            padding: 14px;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="page-header">
-            <h2 class="m-0"><i class="bi bi-graph-up-arrow me-2"></i>实时候选股评分系统</h2>
-            <div class="d-flex align-items-center gap-3">
-                <div class="btn-group" role="group" id="strategyToggle">
-                    <input type="radio" class="btn-check" name="strategyVersion" id="strategyV2" value="V2" checked>
-                    <label class="btn btn-outline-secondary btn-sm" for="strategyV2">V2 尾盘动量</label>
-                    <input type="radio" class="btn-check" name="strategyVersion" id="strategyV3" value="V3">
-                    <label class="btn btn-outline-primary btn-sm" for="strategyV3">V3 交易适配</label>
-                </div>
-                <div class="text-muted small" id="strategyLabel">当前策略: V2</div>
-            </div>
+<div class="container">
+    <div class="hero d-flex flex-wrap align-items-center justify-content-between gap-3">
+        <div>
+            <h1 class="h2 mb-3">稳健短线策略系统</h1>
+            <div class="opacity-75">保留基础数据导入能力，新策略按市场环境、硬过滤、性价比排序和影子盘验证运行。</div>
         </div>
-        
-        <div class="card">
-            <div class="card-header">
-                <i class="bi bi-filter-square me-2"></i>计算参数配置
-            </div>
-            <div class="card-body p-4">
-                <form id="calcForm" class="row g-4">
-                    <div class="col-md-3">
-                        <label for="stockCode" class="form-label fw-bold">股票代码</label>
-                        <div class="input-group">
-                            <span class="input-group-text"><i class="bi bi-hash"></i></span>
-                            <input type="text" class="form-control" id="stockCode" placeholder="例如: 600000 (可选)">
-                        </div>
-                        <div class="form-text mt-2">留空则计算所有股票</div>
-                    </div>
-                    <div class="col-md-3">
-                        <label for="tradeDate" class="form-label fw-bold">交易日期</label>
-                        <div class="input-group">
-                            <span class="input-group-text"><i class="bi bi-calendar3"></i></span>
-                            <input type="date" class="form-control" id="tradeDate">
-                        </div>
-                        <div class="form-text mt-2">留空则默认当日</div>
-                    </div>
-                    <div class="col-md-3 d-flex align-items-end">
-                        <button type="button" class="btn btn-outline-primary w-100 py-2 fw-bold" id="btnPrepare">
-                            <i class="bi bi-layers-half me-1"></i> 生成因子快照
-                        </button>
-                    </div>
-                    <div class="col-md-3 d-flex align-items-end">
-                        <button type="submit" class="btn btn-primary w-100 py-2 fw-bold" id="btnSubmit">
-                            <i class="bi bi-play-fill me-1"></i> 执行计算评分
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
+        <a class="btn btn-light btn-lg" href="/strategy-dashboard.html">进入策略仪表板</a>
+    </div>
 
-        <div class="card">
-            <div class="card-header">
-                <i class="bi bi-calendar-range me-2"></i>按日期范围批量生成
-            </div>
-            <div class="card-body p-4">
-                <div class="row g-4 align-items-end">
-                    <div class="col-md-3">
-                        <label for="batchStartDate" class="form-label fw-bold">开始日期</label>
-                        <div class="input-group">
-                            <span class="input-group-text"><i class="bi bi-calendar-event"></i></span>
-                            <input type="date" class="form-control" id="batchStartDate">
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <label for="batchEndDate" class="form-label fw-bold">结束日期</label>
-                        <div class="input-group">
-                            <span class="input-group-text"><i class="bi bi-calendar-check"></i></span>
-                            <input type="date" class="form-control" id="batchEndDate">
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label fw-bold">生成内容</label>
-                        <div class="border rounded-3 px-3 py-2 bg-light">
-                            <div class="form-check form-check-inline">
-                                <input class="form-check-input" type="checkbox" id="batchGenerateSnapshot" checked>
-                                <label class="form-check-label" for="batchGenerateSnapshot">快照</label>
-                            </div>
-                            <div class="form-check form-check-inline">
-                                <input class="form-check-input" type="checkbox" id="batchGenerateScore" checked>
-                                <label class="form-check-label" for="batchGenerateScore">评分</label>
-                            </div>
-                        </div>
-                        <div class="form-text mt-2">评分会按全市场生成并入库</div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="d-grid gap-2">
-                            <button type="button" class="btn btn-outline-secondary py-2 fw-bold" id="btnCheckMissingDates">
-                                <i class="bi bi-search me-1"></i> 检测缺失日期
-                            </button>
-                            <button type="button" class="btn btn-warning py-2 fw-bold" id="btnBatchGenerate">
-                                <i class="bi bi-lightning-charge me-1"></i> 批量生成快照和评分
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                <div class="mt-4">
-                    <div class="d-flex align-items-center justify-content-between mb-2">
-                        <span class="text-muted small" id="batchProgressText">待开始</span>
-                        <span class="text-muted small batch-progress-label" id="batchProgressCount">0 / 0</span>
-                    </div>
-                    <div class="progress" style="height: 22px;">
-                        <div class="progress-bar progress-bar-striped" id="batchProgressBar" role="progressbar" style="width: 0%;">0%</div>
-                    </div>
-                    <div class="batch-log mt-3" id="batchGenerateLog">请选择日期范围后开始。系统会按日期顺序执行，非交易日或缺少行情数据会在日志中显示失败原因。</div>
-                </div>
-            </div>
-        </div>
-
-        <div id="loading" class="loading shadow-sm">
-            <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;">
-                <span class="visually-hidden">加载中...</span>
-            </div>
-            <h5 class="mt-3 text-secondary">计算任务处理中...</h5>
-            <p class="text-muted">这可能需要几十秒到几分钟，具体取决于数据量，请勿关闭窗口。</p>
-        </div>
-
-        <div id="resultArea" style="display: none;">
-            <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
-                <h4 class="m-0 text-dark"><i class="bi bi-list-check me-2"></i>计算结果集</h4>
-                <div class="d-flex flex-wrap align-items-center result-toolbar">
-                    <div class="input-group input-group-sm result-search">
-                        <span class="input-group-text"><i class="bi bi-search"></i></span>
-                        <input type="text" class="form-control" id="resultSearchInput" placeholder="按股票代码或简称搜索">
-                        <button class="btn btn-outline-secondary" type="button" id="clearResultSearch" title="清空搜索">
-                            <i class="bi bi-x-lg"></i>
-                        </button>
-                    </div>
-                    <span class="text-muted small" id="resultCount">共 0 条</span>
-                    <button class="btn btn-outline-success btn-sm" onclick="exportToExcel()">
-                        <i class="bi bi-file-earmark-excel me-1"></i> 导出为 Excel
-                    </button>
-                </div>
-            </div>
-            
+    <div class="row g-4">
+        <div class="col-lg-6">
             <div class="card">
-                <div class="table-responsive">
-                    <table id="resultTable" class="table table-hover align-middle">
-                        <thead class="sticky-table-header">
-                            <tr>
-                                <th>交易日期</th>
-                                <th>代码</th>
-                                <th>简称</th>
-                                <th>板块/行业</th>
-                                <th>14:30价格</th>
-                                <th>尾盘动量</th>
-                                <th>日内位置</th>
-                                <th>短样本胜率</th>
-                                <th>总评分</th>
-                                <th>排名</th>
-                                <th>置信度</th>
-                                <th>状态</th>
-                            </tr>
-                        </thead>
-                        <tbody id="resultBody">
-                        </tbody>
-                    </table>
+                <div class="card-body p-4">
+                    <h2 class="h5 mb-3">日K数据导入</h2>
+                    <div class="mb-3">
+                        <label class="form-label">股票代码</label>
+                        <input id="dailyStockCode" class="form-control" placeholder="ALL 或 600000">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">交易日期</label>
+                        <input id="dailyTradeDate" type="date" class="form-control">
+                    </div>
+                    <button class="btn btn-primary w-100" onclick="importDailyData()">导入日K</button>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card">
+                <div class="card-body p-4">
+                    <h2 class="h5 mb-3">分时数据导入</h2>
+                    <div class="mb-3">
+                        <label class="form-label">股票代码</label>
+                        <input id="minuteStockCode" class="form-control" placeholder="600000">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">交易日期</label>
+                        <input id="minuteTradeDate" type="date" class="form-control">
+                    </div>
+                    <button class="btn btn-outline-primary w-100" onclick="importMinuteData()">导入分时</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- 详情模态框 (可选) -->
-    <div class="modal fade" id="detailModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title">评分明细 - <span id="detailStockName"></span></h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+    <div class="card">
+        <div class="card-body p-4">
+            <h2 class="h5 mb-3">数据缺失检查</h2>
+            <div class="row g-3 align-items-end">
+                <div class="col-md-4">
+                    <label class="form-label">股票代码</label>
+                    <input id="missingStockCode" class="form-control" placeholder="可选">
                 </div>
-                <div class="modal-body" id="detailContent">
-                    <!-- 动态生成明细内容 -->
+                <div class="col-md-3">
+                    <label class="form-label">开始日期</label>
+                    <input id="missingStartDate" type="date" class="form-control">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">结束日期</label>
+                    <input id="missingEndDate" type="date" class="form-control">
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-secondary w-100" onclick="checkMissingData()">检查</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        let currentResults = [];
-        let currentKeyword = '';
+    <div class="card">
+        <div class="card-body p-4">
+            <h2 class="h5 mb-3">执行结果</h2>
+            <div id="resultBox" class="result-box">等待操作。</div>
+        </div>
+    </div>
+</div>
 
-        function getStrategyVersion() {
-            const v3Radio = document.getElementById('strategyV3');
-            return v3Radio && v3Radio.checked ? 'V3' : 'V2';
-        }
+<script>
+    function setResult(data) {
+        document.getElementById('resultBox').textContent = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+    }
 
-        function isV3() {
-            return getStrategyVersion() === 'V3';
-        }
+    function stockPayload(stockCodeId, tradeDateId) {
+        return {
+            stockCode: document.getElementById(stockCodeId).value || null,
+            tradeDate: document.getElementById(tradeDateId).value || null
+        };
+    }
 
-        // 策略切换时更新标签和表格头
-        document.querySelectorAll('input[name="strategyVersion"]').forEach(radio => {
-            radio.addEventListener('change', function() {
-                document.getElementById('strategyLabel').textContent = '当前策略: ' + this.value;
-                // 清空结果
-                document.getElementById('resultArea').style.display = 'none';
-                currentResults = [];
-                updateTableHeader(this.value);
-            });
+    async function postJson(url, body) {
+        setResult('处理中...');
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
         });
+        setResult(await response.json());
+    }
 
-        function updateTableHeader(version) {
-            const thead = document.querySelector('#resultTable thead tr');
-            if (version === 'V3') {
-                thead.innerHTML = `
-                    <th>交易日期</th>
-                    <th>代码</th>
-                    <th>简称</th>
-                    <th>板块</th>
-                    <th>14:30价格</th>
-                    <th>尾盘动量</th>
-                    <th>日内位置</th>
-                    <th>振幅20d</th>
-                    <th>早盘冲高</th>
-                    <th>买入适配</th>
-                    <th>预期净收益</th>
-                    <th>风险控制</th>
-                    <th>总评分</th>
-                    <th>排名</th>
-                    <th>置信度</th>
-                    <th>状态</th>
-                `;
-            } else {
-                thead.innerHTML = `
-                    <th>交易日期</th>
-                    <th>代码</th>
-                    <th>简称</th>
-                    <th>板块/行业</th>
-                    <th>14:30价格</th>
-                    <th>尾盘动量</th>
-                    <th>日内位置</th>
-                    <th>短样本胜率</th>
-                    <th>总评分</th>
-                    <th>排名</th>
-                    <th>置信度</th>
-                    <th>状态</th>
-                `;
-            }
+    function importDailyData() {
+        postJson('/anlysis/importStockDailyData', stockPayload('dailyStockCode', 'dailyTradeDate')).catch(error => setResult(error.message));
+    }
+
+    function importMinuteData() {
+        postJson('/anlysis/importStockMinuteData', stockPayload('minuteStockCode', 'minuteTradeDate')).catch(error => setResult(error.message));
+    }
+
+    async function checkMissingData() {
+        const params = new URLSearchParams();
+        const stockCode = document.getElementById('missingStockCode').value;
+        const startDate = document.getElementById('missingStartDate').value;
+        const endDate = document.getElementById('missingEndDate').value;
+        if (stockCode) params.append('stockCode', stockCode);
+        params.append('startDate', startDate);
+        params.append('endDate', endDate);
+        setResult('处理中...');
+        try {
+            const response = await fetch('/anlysis/checkMissingData?' + params.toString(), { method: 'POST' });
+            setResult(await response.json());
+        } catch (error) {
+            setResult(error.message);
         }
-
-        document.getElementById('btnCheckMissingDates').addEventListener('click', checkMissingGenerationDates);
-        document.getElementById('btnBatchGenerate').addEventListener('click', runBatchGenerate);
-
-        function appendBatchLog(message) {
-            const log = document.getElementById('batchGenerateLog');
-            const now = new Date().toLocaleTimeString();
-            const prefix = log.dataset.started === 'true' ? '\n' : '';
-            log.dataset.started = 'true';
-            log.textContent += `${prefix}[${now}] ${message}`;
-            log.scrollTop = log.scrollHeight;
-        }
-
-        function resetBatchLog() {
-            const log = document.getElementById('batchGenerateLog');
-            log.dataset.started = 'false';
-            log.textContent = '';
-        }
-
-        function setBatchProgress(done, total, text) {
-            const percent = total === 0 ? 0 : Math.round((done / total) * 100);
-            const progressBar = document.getElementById('batchProgressBar');
-            document.getElementById('batchProgressText').textContent = text;
-            document.getElementById('batchProgressCount').textContent = `${done} / ${total}`;
-            progressBar.style.width = `${percent}%`;
-            progressBar.textContent = `${percent}%`;
-        }
-
-        function buildDateRange(startDateText, endDateText) {
-            const startDate = new Date(`${startDateText}T00:00:00`);
-            const endDate = new Date(`${endDateText}T00:00:00`);
-            const dates = [];
-
-            for (const date = new Date(startDate); date <= endDate; date.setDate(date.getDate() + 1)) {
-                const year = date.getFullYear();
-                const month = String(date.getMonth() + 1).padStart(2, '0');
-                const day = String(date.getDate()).padStart(2, '0');
-                dates.push(`${year}-${month}-${day}`);
-            }
-
-            return dates;
-        }
-
-        function isSuccessResponse(res) {
-            return res && (res.result === 1 || res.code === 200 || res.success === true);
-        }
-
-        async function postJson(url, requestData) {
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(requestData)
-            });
-            const text = await response.text();
-            const res = text ? JSON.parse(text) : {};
-
-            if (!response.ok) {
-                throw new Error(res.msg || res.message || `HTTP ${response.status}`);
-            }
-
-            return res;
-        }
-
-        async function runBatchGenerate() {
-            const startDate = document.getElementById('batchStartDate').value;
-            const endDate = document.getElementById('batchEndDate').value;
-            const needSnapshot = document.getElementById('batchGenerateSnapshot').checked;
-            const needScore = document.getElementById('batchGenerateScore').checked;
-            const btn = document.getElementById('btnBatchGenerate');
-
-            if (!startDate || !endDate) {
-                alert('请选择开始日期和结束日期。');
-                return;
-            }
-
-            if (startDate > endDate) {
-                alert('开始日期不能晚于结束日期。');
-                return;
-            }
-
-            if (!needSnapshot && !needScore) {
-                alert('请至少选择生成快照或评分。');
-                return;
-            }
-
-            const dates = buildDateRange(startDate, endDate);
-            resetBatchLog();
-            setBatchProgress(0, dates.length, '批量任务准备中...');
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 批量生成中...';
-
-            let successDays = 0;
-            let failedDays = 0;
-
-            for (let index = 0; index < dates.length; index++) {
-                const tradeDate = dates[index];
-                let daySuccess = true;
-                appendBatchLog(`开始处理 ${tradeDate}`);
-
-                if (needSnapshot) {
-                    try {
-                        const snapshotUrl = isV3() ? '/anlysis/prepareSnapshotsV3' : '/anlysis/prepareSnapshots';
-                        const snapshotRes = await postJson(snapshotUrl, { tradeDate });
-                        if (isSuccessResponse(snapshotRes)) {
-                            appendBatchLog(`${tradeDate} 快照生成成功`);
-                        } else {
-                            daySuccess = false;
-                            appendBatchLog(`${tradeDate} 快照生成失败：${snapshotRes.msg || snapshotRes.message || '未知错误'}`);
-                        }
-                    } catch (error) {
-                        daySuccess = false;
-                        appendBatchLog(`${tradeDate} 快照请求失败：${error.message}`);
-                    }
-                }
-
-                if (needScore) {
-                    try {
-                        const scoreUrl = isV3() ? '/anlysis/calculateCandidateScoreV3' : '/anlysis/calculateCandidateScore';
-                        // stockCode 传 null，确保后端按全市场评分并写入评分结果表。
-                        const scoreRes = await postJson(scoreUrl, {
-                            stockCode: null,
-                            tradeDate
-                        });
-                        if (isSuccessResponse(scoreRes)) {
-                            const count = Array.isArray(scoreRes.data) ? scoreRes.data.length : 0;
-                            appendBatchLog(`${tradeDate} 评分生成成功，返回 ${count} 条`);
-                        } else {
-                            daySuccess = false;
-                            appendBatchLog(`${tradeDate} 评分生成失败：${scoreRes.msg || scoreRes.message || '未知错误'}`);
-                        }
-                    } catch (error) {
-                        daySuccess = false;
-                        appendBatchLog(`${tradeDate} 评分请求失败：${error.message}`);
-                    }
-                }
-
-                if (daySuccess) {
-                    successDays++;
-                } else {
-                    failedDays++;
-                }
-
-                setBatchProgress(index + 1, dates.length, `正在处理 ${tradeDate}`);
-            }
-
-            btn.disabled = false;
-            btn.innerHTML = '<i class="bi bi-lightning-charge me-1"></i> 批量生成快照和评分';
-            setBatchProgress(dates.length, dates.length, `处理完成，成功 ${successDays} 天，失败 ${failedDays} 天`);
-            appendBatchLog(`批量任务完成：成功 ${successDays} 天，失败 ${failedDays} 天`);
-        }
-
-        async function checkMissingGenerationDates() {
-            const startDate = document.getElementById('batchStartDate').value;
-            const endDate = document.getElementById('batchEndDate').value;
-            const btn = document.getElementById('btnCheckMissingDates');
-
-            if (!startDate || !endDate) {
-                alert('请选择开始日期和结束日期。');
-                return;
-            }
-
-            if (startDate > endDate) {
-                alert('开始日期不能晚于结束日期。');
-                return;
-            }
-
-            resetBatchLog();
-            setBatchProgress(0, 0, '正在检测缺失日期...');
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 检测中...';
-
-            try {
-                const res = await postJson('/anlysis/missingGenerationDates', { startDate, endDate });
-                if (!isSuccessResponse(res)) {
-                    appendBatchLog(`检测失败：${res.msg || res.message || '未知错误'}`);
-                    return;
-                }
-                renderMissingGenerationDates(res.data || {});
-            } catch (error) {
-                appendBatchLog(`检测请求失败：${error.message}`);
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = '<i class="bi bi-search me-1"></i> 检测缺失日期';
-            }
-        }
-
-        function renderMissingGenerationDates(data) {
-            const tradeDayCount = data.tradeDayCount || 0;
-            const missingFactorDates = data.missingFactorDates || [];
-            const missingScoreDates = data.missingScoreDates || [];
-            const missingItems = (data.items || []).filter(item => !item.factorGenerated || !item.scoreGenerated);
-
-            setBatchProgress(tradeDayCount, tradeDayCount, `检测完成，共 ${tradeDayCount} 个交易日`);
-            appendBatchLog(`检测范围：${data.startDate || '-'} 至 ${data.endDate || '-'}`);
-            appendBatchLog(`交易日数量：${tradeDayCount}`);
-            appendBatchLog(`因子未生成日期 ${missingFactorDates.length} 天：${formatDateList(missingFactorDates)}`);
-            appendBatchLog(`评分报告未生成日期 ${missingScoreDates.length} 天：${formatDateList(missingScoreDates)}`);
-
-            if (missingItems.length === 0) {
-                appendBatchLog('范围内交易日的因子和评分报告都已生成。');
-                return;
-            }
-
-            appendBatchLog('缺失明细：');
-            missingItems.forEach(item => {
-                const parts = [];
-                if (!item.factorGenerated) {
-                    parts.push(`因子缺失：${(item.missingFactorItems || []).join('、') || '未知快照'}`);
-                }
-                if (!item.scoreGenerated) {
-                    parts.push('评分报告缺失');
-                }
-                appendBatchLog(`${item.tradeDate} ${parts.join('；')}`);
-            });
-        }
-
-        function formatDateList(dates) {
-            return dates.length ? dates.join('、') : '无';
-        }
-
-        document.getElementById('btnPrepare').addEventListener('click', function() {
-            const tradeDate = document.getElementById('tradeDate').value;
-            const btn = document.getElementById('btnPrepare');
-            const snapshotUrl = isV3() ? '/anlysis/prepareSnapshotsV3' : '/anlysis/prepareSnapshots';
-
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 生成中...';
-
-            fetch(snapshotUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tradeDate: tradeDate || null })
-            })
-            .then(response => response.json())
-            .then(res => {
-                if (res.result === 1 || res.code === 200) {
-                    alert('因子快照生成成功！');
-                } else {
-                    alert('生成失败: ' + (res.msg || res.message || '未知错误'));
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('请求失败，请检查网络。');
-            })
-            .finally(() => {
-                btn.disabled = false;
-                btn.innerHTML = '<i class="bi bi-layers-half me-1"></i> 生成因子快照';
-            });
-        });
-
-        document.getElementById('calcForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-            
-            const stockCode = document.getElementById('stockCode').value.trim();
-            const tradeDate = document.getElementById('tradeDate').value;
-            
-            const requestData = {
-                stockCode: stockCode || null,
-                tradeDate: tradeDate || null
-            };
-            
-            // UI 反馈
-            document.getElementById('btnSubmit').disabled = true;
-            document.getElementById('loading').style.display = 'block';
-            document.getElementById('resultArea').style.display = 'none';
-            document.getElementById('resultBody').innerHTML = '';
-            currentResults = [];
-            currentKeyword = '';
-            document.getElementById('resultSearchInput').value = '';
-            updateResultCount(0);
-
-            const scoreUrl = isV3() ? '/anlysis/calculateCandidateScoreV3' : '/anlysis/calculateCandidateScore';
-
-            fetch(scoreUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(requestData)
-            })
-            .then(response => response.json())
-            .then(res => {
-                if (res.result === 1) {
-                    renderResults(res.data);
-                } else {
-                    showError('计算失败: ' + (res.msg || '未知错误'));
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                showError('请求服务器时出错，请检查网络或后端日志。');
-            })
-            .finally(() => {
-                document.getElementById('btnSubmit').disabled = false;
-                document.getElementById('loading').style.display = 'none';
-            });
-        });
-
-        function showError(msg) {
-            alert(msg);
-        }
-
-        function formatFinalScore(value) {
-            if (value === null || value === undefined || value === '') {
-                return '-';
-            }
-
-            const rawValue = String(value).trim();
-            const numericValue = Number(rawValue);
-            if (!rawValue || !Number.isFinite(numericValue)) {
-                return '-';
-            }
-
-            const normalizedValue = /e/i.test(rawValue) ? numericValue.toFixed(20) : rawValue;
-            const [integerPart, decimalPart = ''] = normalizedValue.split('.');
-            return `${integerPart}.${decimalPart.padEnd(4, '0').slice(0, 4)}`;
-        }
-
-        document.getElementById('resultSearchInput').addEventListener('input', function() {
-            currentKeyword = this.value.trim();
-            renderResultRows(filterResults(currentResults, currentKeyword));
-        });
-
-        document.getElementById('clearResultSearch').addEventListener('click', function() {
-            document.getElementById('resultSearchInput').value = '';
-            currentKeyword = '';
-            renderResultRows(currentResults);
-        });
-
-        function renderResults(data) {
-            if (!data || data.length === 0) {
-                alert('未找到符合条件的数据或计算结果为空。');
-                return;
-            }
-
-            currentResults = data;
-            currentKeyword = '';
-            document.getElementById('resultSearchInput').value = '';
-            renderResultRows(currentResults);
-            document.getElementById('resultArea').style.display = 'block';
-        }
-
-        function renderResultRows(data) {
-            const body = document.getElementById('resultBody');
-            body.innerHTML = '';
-
-            if (!data || data.length === 0) {
-                const colSpan = isV3() ? 16 : 12;
-                body.innerHTML = `<tr><td colspan="${colSpan}" class="text-center text-muted py-4">未匹配到股票代码或简称</td></tr>`;
-                updateResultCount(0);
-                return;
-            }
-
-            data.forEach(item => {
-                const tr = document.createElement('tr');
-
-                // 评分着色
-                let scoreClass = 'score-low';
-                const finalScore = item.finalScore || 0;
-                if (finalScore >= 80) scoreClass = 'score-high';
-                else if (finalScore >= 60) scoreClass = 'score-mid';
-
-                // 置信度标签
-                let confBadge = 'bg-secondary';
-                const confLevel = item.confidenceLevel || '';
-                if (confLevel.includes('HIGH')) confBadge = 'bg-success';
-                else if (confLevel.includes('MEDIUM')) confBadge = 'bg-info';
-
-                if (isV3()) {
-                    // V3 结果列：更多评分维度
-                    tr.innerHTML = `
-                        <td class="text-nowrap">${item.tradeDate || '-'}</td>
-                        <td class="fw-bold">${item.stockCode || '-'}</td>
-                        <td>${item.shortName || '-'}</td>
-                        <td><small class="text-muted">${item.sector || item.market || '-'}</small></td>
-                        <td>${item.price1430 != null ? Number(item.price1430).toFixed(2) : '-'}</td>
-                        <td>${item.tailMomentum != null ? (item.tailMomentum * 100).toFixed(2) + '%' : '-'}</td>
-                        <td>${item.intradayPosition != null ? (item.intradayPosition * 100).toFixed(2) + '%' : '-'}</td>
-                        <td>${item.avgAmplitude20d != null ? (item.avgAmplitude20d * 100).toFixed(2) + '%' : '-'}</td>
-                        <td>${item.morningBreakoutScore != null ? (item.morningBreakoutScore * 100).toFixed(1) : '-'}</td>
-                        <td>${item.buyExecutionFitScore != null ? (item.buyExecutionFitScore * 100).toFixed(1) : '-'}</td>
-                        <td>${item.expectedNetReturnScore != null ? (item.expectedNetReturnScore * 100).toFixed(1) : '-'}</td>
-                        <td>${item.riskControlScore != null ? (item.riskControlScore * 100).toFixed(1) : '-'}</td>
-                        <td class="${scoreClass} fs-5">${formatFinalScore(item.finalScore)}</td>
-                        <td><span class="badge bg-light text-dark border">${item.rankNo || '-'}</span></td>
-                        <td><span class="badge ${confBadge}">${item.confidenceLevel || '-'}</span></td>
-                        <td>
-                            ${item.validFlag
-                                ? '<span class="badge badge-success"><i class="bi bi-check-circle me-1"></i>有效</span>'
-                                : '<span class="badge badge-danger" data-bs-toggle="tooltip" title="'+(item.invalidReason||'数据不足')+'"><i class="bi bi-x-circle me-1"></i>无效</span>'}
-                        </td>
-                    `;
-                } else {
-                    // V2 结果列
-                    tr.innerHTML = `
-                        <td class="text-nowrap">${item.tradeDate || '-'}</td>
-                        <td class="fw-bold">${item.stockCode || '-'}</td>
-                        <td>${item.shortName || '-'}</td>
-                        <td><small class="text-muted">${item.sector || item.market || '-'}</small></td>
-                        <td>${item.price1430 != null ? Number(item.price1430).toFixed(2) : '-'}</td>
-                        <td>${item.tailMomentum != null ? (item.tailMomentum * 100).toFixed(2) + '%' : '-'}</td>
-                        <td>${item.intradayPosition != null ? (item.intradayPosition * 100).toFixed(2) + '%' : '-'}</td>
-                        <td>${item.shortWinRate != null ? (item.shortWinRate * 100).toFixed(1) + '%' : '-'}</td>
-                        <td class="${scoreClass} fs-5">${formatFinalScore(item.finalScore)}</td>
-                        <td><span class="badge bg-light text-dark border">${item.rankNo || '-'}</span></td>
-                        <td><span class="badge ${confBadge}">${item.confidenceLevel || '-'}</span></td>
-                        <td>
-                            ${item.validFlag
-                                ? '<span class="badge badge-success"><i class="bi bi-check-circle me-1"></i>有效</span>'
-                                : '<span class="badge badge-danger" data-bs-toggle="tooltip" title="'+(item.invalidReason||'数据不足')+'"><i class="bi bi-x-circle me-1"></i>无效</span>'}
-                        </td>
-                    `;
-                }
-                body.appendChild(tr);
-            });
-            
-            // 初始化 Tooltips
-            const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
-            tooltipTriggerList.map(function (tooltipTriggerEl) {
-                return new bootstrap.Tooltip(tooltipTriggerEl);
-            });
-
-            updateResultCount(data.length);
-        }
-
-        function filterResults(data, keyword) {
-            const normalizedKeyword = keyword.toLowerCase();
-            if (!normalizedKeyword) {
-                return data;
-            }
-
-            return data.filter(item => {
-                const stockCode = String(item.stockCode || '').toLowerCase();
-                const shortName = String(item.shortName || '').toLowerCase();
-                const stockName = String(item.stockName || '').toLowerCase();
-                return stockCode.includes(normalizedKeyword)
-                    || shortName.includes(normalizedKeyword)
-                    || stockName.includes(normalizedKeyword);
-            });
-        }
-
-        function updateResultCount(displayCount) {
-            const resultCount = document.getElementById('resultCount');
-            const totalCount = currentResults.length;
-            resultCount.textContent = currentKeyword
-                ? `匹配 ${displayCount} / 共 ${totalCount} 条`
-                : `共 ${totalCount} 条`;
-        }
-
-        function exportToExcel() {
-            const table = document.getElementById("resultTable");
-            const tradeDate = document.getElementById('tradeDate').value || 'All';
-            const fileName = `评分结果_${tradeDate}.xls`;
-            
-            const html = `
-                <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-                <head><meta charset="UTF-8"></head>
-                <body>${table.outerHTML}</body>
-                </html>
-            `;
-            
-            const blob = new Blob([html], { type: 'application/vnd.ms-excel' });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = fileName;
-            link.click();
-            URL.revokeObjectURL(url);
-        }
-    </script>
+    }
+</script>
 </body>
 </html>

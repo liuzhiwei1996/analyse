@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>策略仪表板</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            background: #f6f8fb;
+            color: #1f2937;
+            font-family: "Microsoft YaHei", Arial, sans-serif;
+            padding: 28px 0;
+        }
+        .container-fluid { max-width: 1480px; }
+        .card {
+            border: none;
+            border-radius: 16px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+            margin-bottom: 22px;
+        }
+        .regime-badge {
+            border-radius: 999px;
+            display: inline-flex;
+            align-items: center;
+            font-size: 18px;
+            font-weight: 700;
+            padding: 8px 18px;
+        }
+        .regime-STRONG { background: #dcfce7; color: #166534; }
+        .regime-NEUTRAL { background: #fef3c7; color: #92400e; }
+        .regime-WEAK { background: #fee2e2; color: #991b1b; }
+        .metric {
+            background: #f8fafc;
+            border-radius: 12px;
+            padding: 12px;
+        }
+        .metric-label { color: #64748b; font-size: 13px; }
+        .metric-value { font-size: 20px; font-weight: 700; }
+        .table-responsive { max-height: 430px; }
+        .small-table { font-size: 13px; }
+        .status-text { color: #64748b; }
+    </style>
+</head>
+<body>
+<div class="container-fluid">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+        <div>
+            <h1 class="h3 mb-1">稳健短线策略仪表板</h1>
+            <div class="status-text" id="dashboardStatus">市场环境优先，弱市允许 NO_TRADE，所有信号进入影子盘验证。</div>
+        </div>
+        <div class="d-flex gap-2 align-items-end">
+            <div>
+                <label class="form-label mb-1">交易日期</label>
+                <input id="tradeDate" type="date" class="form-control">
+            </div>
+            <button class="btn btn-outline-secondary" onclick="loadDashboard()">刷新</button>
+            <button class="btn btn-primary" onclick="triggerStrategy()">触发策略</button>
+            <a class="btn btn-light" href="/index.html">返回首页</a>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-xl-4">
+            <div class="card h-100">
+                <div class="card-body p-4">
+                    <h2 class="h5 mb-3">市场环境</h2>
+                    <div id="regimeBadge" class="regime-badge mb-3">待加载</div>
+                    <div class="row g-3" id="marketMetrics"></div>
+                    <div class="mt-3 text-muted" id="marketReasoning"></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-4">
+            <div class="card h-100">
+                <div class="card-body p-4">
+                    <h2 class="h5 mb-3">过滤概览</h2>
+                    <canvas id="filterChart" height="190"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-4">
+            <div class="card h-100">
+                <div class="card-body p-4">
+                    <h2 class="h5 mb-3">策略运行日志</h2>
+                    <div class="table-responsive">
+                        <table class="table table-sm small-table align-middle">
+                            <thead><tr><th>开始时间</th><th>状态</th><th>信号数</th><th>信息</th></tr></thead>
+                            <tbody id="logsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-xl-6">
+            <div class="card">
+                <div class="card-body p-4">
+                    <h2 class="h5 mb-3">候选过滤结果</h2>
+                    <div class="table-responsive">
+                        <table class="table table-hover small-table align-middle">
+                            <thead><tr><th>股票</th><th>过滤器</th><th>结果</th><th>原因</th><th>明细</th></tr></thead>
+                            <tbody id="candidatesBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-6">
+            <div class="card">
+                <div class="card-body p-4">
+                    <h2 class="h5 mb-3">组合决策</h2>
+                    <div class="table-responsive">
+                        <table class="table table-hover small-table align-middle">
+                            <thead><tr><th>股票</th><th>rank_value</th><th>胜率</th><th>风险单位</th><th>仓位</th><th>说明</th></tr></thead>
+                            <tbody id="portfolioBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-xl-6">
+            <div class="card">
+                <div class="card-body p-4">
+                    <h2 class="h5 mb-3">影子盘记录</h2>
+                    <div class="table-responsive">
+                        <table class="table table-hover small-table align-middle">
+                            <thead><tr><th>股票</th><th>入场价</th><th>次日开盘</th><th>次日收盘</th><th>PnL bps</th><th>回撤 bps</th></tr></thead>
+                            <tbody id="shadowBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-xl-6">
+            <div class="card">
+                <div class="card-body p-4">
+                    <h2 class="h5 mb-3">风险告警</h2>
+                    <div class="table-responsive">
+                        <table class="table table-hover small-table align-middle">
+                            <thead><tr><th>等级</th><th>类型</th><th>股票</th><th>信息</th><th>状态</th></tr></thead>
+                            <tbody id="alertsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let filterChart;
+
+    document.getElementById('tradeDate').valueAsDate = new Date();
+
+    function unwrap(result) {
+        if (!result || !Object.prototype.hasOwnProperty.call(result, 'data')) {
+            return result;
+        }
+        if (result.result !== 1) {
+            throw new Error(result.msg || '请求失败');
+        }
+        return result.data;
+    }
+
+    async function requestJson(url, options) {
+        const response = await fetch(url, options || {});
+        if (!response.ok) throw new Error('请求失败: ' + response.status);
+        return unwrap(await response.json());
+    }
+
+    function tradeDate() {
+        return document.getElementById('tradeDate').value;
+    }
+
+    function fmt(value) {
+        return value === null || value === undefined ? '-' : value;
+    }
+
+    function row(html) {
+        return '<tr>' + html + '</tr>';
+    }
+
+    function emptyRow(colspan) {
+        return row('<td colspan="' + colspan + '" class="text-muted text-center py-4">暂无数据</td>');
+    }
+
+    function renderMarket(snapshot) {
+        const badge = document.getElementById('regimeBadge');
+        const metrics = document.getElementById('marketMetrics');
+        if (!snapshot) {
+            badge.className = 'regime-badge';
+            badge.textContent = '暂无市场环境';
+            metrics.innerHTML = '';
+            document.getElementById('marketReasoning').textContent = '请先触发策略运行。';
+            return;
+        }
+        badge.className = 'regime-badge regime-' + snapshot.regime;
+        badge.textContent = snapshot.regime;
+        const items = [
+            ['指数趋势', snapshot.indexTrend],
+            ['市场宽度', snapshot.breadthRatio],
+            ['成交活跃度', snapshot.turnoverRatio],
+            ['ATR20分位', snapshot.atr20Percentile],
+            ['尾盘强度', snapshot.tailStrength]
+        ];
+        metrics.innerHTML = items.map(item => '<div class="col-6"><div class="metric"><div class="metric-label">' + item[0] + '</div><div class="metric-value">' + fmt(item[1]) + '</div></div></div>').join('');
+        document.getElementById('marketReasoning').textContent = snapshot.reasoning || '';
+    }
+
+    function renderFilterChart(candidates) {
+        const grouped = candidates.reduce((acc, item) => {
+            const key = item.filterName || 'UNKNOWN';
+            acc[key] = acc[key] || { pass: 0, fail: 0 };
+            item.passed ? acc[key].pass++ : acc[key].fail++;
+            return acc;
+        }, {});
+        const labels = Object.keys(grouped);
+        const pass = labels.map(key => grouped[key].pass);
+        const fail = labels.map(key => grouped[key].fail);
+        if (filterChart) filterChart.destroy();
+        filterChart = new Chart(document.getElementById('filterChart'), {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [
+                    { label: '通过', data: pass, backgroundColor: '#22c55e' },
+                    { label: '失败', data: fail, backgroundColor: '#ef4444' }
+                ]
+            },
+            options: { responsive: true, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } } }
+        });
+    }
+
+    function renderCandidates(items) {
+        document.getElementById('candidatesBody').innerHTML = items.length ? items.map(item => row(
+            '<td>' + fmt(item.stockCode) + '</td>' +
+            '<td>' + fmt(item.filterName) + '</td>' +
+            '<td>' + (item.passed ? '<span class="badge bg-success">通过</span>' : '<span class="badge bg-danger">失败</span>') + '</td>' +
+            '<td>' + fmt(item.rejectionReason) + '</td>' +
+            '<td>' + fmt(item.details) + '</td>'
+        )).join('') : emptyRow(5);
+    }
+
+    function renderPortfolio(items) {
+        document.getElementById('portfolioBody').innerHTML = items.length ? items.map(item => row(
+            '<td>' + fmt(item.stockCode) + '</td>' +
+            '<td>' + fmt(item.rankValue) + '</td>' +
+            '<td>' + fmt(item.pWin) + '</td>' +
+            '<td>' + fmt(item.riskUnit) + '</td>' +
+            '<td>' + fmt(item.positionPct) + '</td>' +
+            '<td>' + fmt(item.reasoning) + '</td>'
+        )).join('') : emptyRow(6);
+    }
+
+    function renderShadow(items) {
+        document.getElementById('shadowBody').innerHTML = items.length ? items.map(item => row(
+            '<td>' + fmt(item.stockCode) + '</td>' +
+            '<td>' + fmt(item.entryPrice) + '</td>' +
+            '<td>' + fmt(item.nextDayOpen) + '</td>' +
+            '<td>' + fmt(item.nextDayClose) + '</td>' +
+            '<td>' + fmt(item.pnlBps) + '</td>' +
+            '<td>' + fmt(item.drawdownBps) + '</td>'
+        )).join('') : emptyRow(6);
+    }
+
+    function renderAlerts(items) {
+        document.getElementById('alertsBody').innerHTML = items.length ? items.map(item => row(
+            '<td><span class="badge bg-' + (item.severity === 'HIGH' ? 'danger' : 'warning') + '">' + fmt(item.severity) + '</span></td>' +
+            '<td>' + fmt(item.alertType) + '</td>' +
+            '<td>' + fmt(item.relatedStockCode) + '</td>' +
+            '<td>' + fmt(item.message) + '</td>' +
+            '<td>' + (item.resolved ? '已处理' : '未处理') + '</td>'
+        )).join('') : emptyRow(5);
+    }
+
+    function renderLogs(items) {
+        document.getElementById('logsBody').innerHTML = items.length ? items.map(item => row(
+            '<td>' + fmt(item.startTime) + '</td>' +
+            '<td>' + fmt(item.status) + '</td>' +
+            '<td>' + fmt(item.stockCount) + '</td>' +
+            '<td>' + fmt(item.errorMessage) + '</td>'
+        )).join('') : emptyRow(4);
+    }
+
+    function userMessage(error) {
+        const message = error && error.message ? error.message : String(error);
+        if (message.includes("doesn't exist")) {
+            return '策略数据表不存在，请先执行 src/main/resources/db/migration/V1__create_strategy_tables.sql。';
+        }
+        return message;
+    }
+
+    async function loadDashboard() {
+        const status = document.getElementById('dashboardStatus');
+        status.textContent = '加载中...';
+        try {
+            const date = tradeDate();
+            const [market, candidates, portfolio, shadow, alerts, logs] = await Promise.all([
+                requestJson('/strategy/market-regime'),
+                requestJson('/strategy/candidates?tradeDate=' + date),
+                requestJson('/strategy/portfolio?tradeDate=' + date),
+                requestJson('/strategy/shadow?tradeDate=' + date),
+                requestJson('/strategy/alerts?tradeDate=' + date),
+                requestJson('/strategy/logs?tradeDate=' + date)
+            ]);
+            renderMarket(market);
+            renderFilterChart(candidates || []);
+            renderCandidates(candidates || []);
+            renderPortfolio(portfolio || []);
+            renderShadow(shadow || []);
+            renderAlerts(alerts || []);
+            renderLogs(logs || []);
+            status.textContent = '加载完成。';
+        } catch (error) {
+            status.textContent = userMessage(error);
+            throw error;
+        }
+    }
+
+    async function triggerStrategy() {
+        const status = document.getElementById('dashboardStatus');
+        status.textContent = '策略运行中...';
+        try {
+            const date = tradeDate();
+            await requestJson('/strategy/trigger?tradeDate=' + date, { method: 'POST' });
+            await loadDashboard();
+        } catch (error) {
+            status.textContent = userMessage(error);
+            throw error;
+        }
+    }
+
+    loadDashboard().catch(error => console.error(error));
+</script>
+</body>
+</html>
