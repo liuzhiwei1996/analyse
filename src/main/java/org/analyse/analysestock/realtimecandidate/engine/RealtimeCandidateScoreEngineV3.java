@@ -6,8 +6,6 @@ import org.analyse.analysestock.analysis.entity.PubStockInfo;
 import org.analyse.analysestock.analysis.entity.RealtimeCandidateScoreResultV3;
 import org.analyse.analysestock.analysis.entity.StockDataDailyAll;
 import org.analyse.analysestock.analysis.entity.StockMinuteData;
-import org.analyse.analysestock.realtimecandidate.calculator.CostCalculator;
-import org.analyse.analysestock.realtimecandidate.calculator.VwapCalculator;
 import org.analyse.analysestock.realtimecandidate.calculator.v3.*;
 import org.analyse.analysestock.realtimecandidate.config.CostConfig;
 import org.analyse.analysestock.realtimecandidate.config.RealtimeStrategyConfig;
@@ -104,20 +102,23 @@ public class RealtimeCandidateScoreEngineV3 {
                 .filter(m -> m.getTradeDate() != null)
                 .collect(Collectors.groupingBy(StockMinuteData::getTradeDate));
         List<StockMinuteData> tMinuteBars = minuteByDate.getOrDefault(tradeDate, Collections.emptyList());
+        Map<String, List<StockMinuteData>> minuteByStock = groupMinuteBarsByStockCode(minuteBars);
+        Map<String, List<StockMinuteData>> tMinuteByStock = groupMinuteBarsByStockCode(tMinuteBars);
 
         Map<String, PubStockInfo> infoMap = securityInfos.stream()
                 .collect(Collectors.toMap(PubStockInfo::getSymbol, i -> i, (a, b) -> a));
 
         // 2. 构建股票池 + 硬过滤
         List<V3FactorSnapshot> snapshots = new ArrayList<>();
-        BigDecimal totalCostBps = CostCalculator.calculateRoundTripCostBps(costConfig);
 
         for (PubStockInfo info : securityInfos) {
             String stockCode = info.getSymbol();
 
             // 获取日K和分钟线数据
             List<StockDataDailyAll> sDaily = dailyMap.getOrDefault(stockCode, Collections.emptyList());
-            List<StockMinuteData> sTMinute = filterMinuteBars(tMinuteBars, stockCode);
+            String normalizedStockCode = normalizeStockCode(stockCode);
+            List<StockMinuteData> sTMinute = tMinuteByStock.getOrDefault(normalizedStockCode, Collections.emptyList());
+            List<StockMinuteData> sMinute = minuteByStock.getOrDefault(normalizedStockCode, Collections.emptyList());
 
             // 创建因子快照
             V3FactorSnapshot snapshot = createBaseSnapshot(stockCode, tradeDate, info, sTMinute);
@@ -151,7 +152,7 @@ public class RealtimeCandidateScoreEngineV3 {
             }
 
             // 短样本统计
-            shortSampleCalculator.calculate(snapshot, stockCode, minuteBars, costConfig, tradeDate);
+            shortSampleCalculator.calculateForStockMinutes(snapshot, sMinute, costConfig, tradeDate);
 
             snapshots.add(snapshot);
         }
@@ -162,6 +163,37 @@ public class RealtimeCandidateScoreEngineV3 {
 
         // 3. 计算市场/板块环境
         calculateMarketSectorContext(snapshots, infoMap);
+        return scoreSnapshots(tradeDate, snapshots);
+    }
+
+    public List<RealtimeCandidateScoreResultV3> calculateWithSnapshots(
+            LocalDate tradeDate,
+            List<V3FactorSnapshot> snapshots,
+            RealtimeStrategyConfig strategyConfig,
+            CostConfig costConfig) {
+
+        if (CollectionUtils.isEmpty(snapshots)) {
+            return Collections.emptyList();
+        }
+
+        List<V3FactorSnapshot> validSnapshots = snapshots.stream()
+                .filter(V3FactorSnapshot::isValid)
+                .collect(Collectors.toList());
+        if (validSnapshots.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        boolean missingMarketContext = validSnapshots.stream().anyMatch(s -> s.getMarketBreadth() == null);
+        if (missingMarketContext) {
+            calculateMarketSectorContext(validSnapshots, Collections.emptyMap());
+        }
+
+        return scoreSnapshots(tradeDate, validSnapshots);
+    }
+
+    private List<RealtimeCandidateScoreResultV3> scoreSnapshots(
+            LocalDate tradeDate,
+            List<V3FactorSnapshot> snapshots) {
 
         // 检查全市场不出候选
         if (!snapshots.isEmpty()) {
@@ -210,7 +242,7 @@ public class RealtimeCandidateScoreEngineV3 {
                     snapshot.getShortSampleCount() != null ? snapshot.getShortSampleCount() : 0);
             ScoreExplanation explanation = scoreAggregator.explain(snapshot);
 
-            RealtimeCandidateScoreResultV3Record record = buildRecord(snapshot, finalScore, confidenceLevel, explanation, tradeDate);
+            RealtimeCandidateScoreResultV3 record = buildRecord(snapshot, finalScore, confidenceLevel, explanation, tradeDate);
             records.add(record);
         }
 
@@ -494,6 +526,30 @@ public class RealtimeCandidateScoreEngineV3 {
     /**
      * 过滤匹配某只股票的分钟线。
      */
+    private Map<String, List<StockMinuteData>> groupMinuteBarsByStockCode(List<StockMinuteData> minuteBars) {
+        if (CollectionUtils.isEmpty(minuteBars)) return Collections.emptyMap();
+        return minuteBars.stream()
+                .filter(m -> m.getStockCode() != null)
+                .collect(Collectors.groupingBy(m -> normalizeStockCode(m.getStockCode())));
+    }
+
+    private String normalizeStockCode(Integer stockCode) {
+        return String.format("%06d", stockCode);
+    }
+
+    private String normalizeStockCode(String stockCode) {
+        if (stockCode == null) return "";
+        String pureStockCode = stockCode.length() > 6 ? stockCode.substring(stockCode.length() - 6) : stockCode;
+        if (pureStockCode.length() < 6) {
+            try {
+                return String.format("%06d", Integer.parseInt(pureStockCode));
+            } catch (NumberFormatException e) {
+                return pureStockCode;
+            }
+        }
+        return pureStockCode;
+    }
+
     private List<StockMinuteData> filterMinuteBars(List<StockMinuteData> tMinuteBars, String stockCode) {
         return tMinuteBars.stream()
                 .filter(m -> {

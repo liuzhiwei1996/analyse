@@ -5,11 +5,13 @@ import org.analyse.analysestock.analysis.api.AnalysisApi;
 import org.analyse.analysestock.analysis.serivce.ImportService;
 import org.analyse.analysestock.analysis.vo.GenerationMissingDateRequest;
 import org.analyse.analysestock.analysis.vo.GenerationMissingDateResponse;
+import org.analyse.analysestock.analysis.vo.SnapshotTaskProgress;
 import org.analyse.analysestock.analysis.vo.StockInfoVo;
 import org.analyse.analysestock.config.ResultData;
 import org.analyse.analysestock.config.ResultUtil;
 import org.analyse.analysestock.analysis.entity.RealtimeCandidateScoreResultV3;
 import org.analyse.analysestock.realtimecandidate.dto.RealtimeCandidateScoreRecord;
+import org.analyse.analysestock.realtimecandidate.dto.V3FactorSnapshot;
 import org.analyse.analysestock.analysis.vo.MissingStockDataItem;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -115,6 +117,23 @@ public class AnalysisController implements AnalysisApi {
     public ResultData<List<RealtimeCandidateScoreResultV3>> calculateCandidateScoreV3(@RequestBody StockInfoVo stockInfoVo) {
         return ResultUtil.success(importService.calculateRealtimeCandidateScoresV3(
                 stockInfoVo.getStockCode(), stockInfoVo.getTradeDate()));
+    }
+
+    @PostMapping("/factorSnapshotsV3")
+    public ResultData<List<V3FactorSnapshot>> factorSnapshotsV3(@RequestBody StockInfoVo stockInfoVo) {
+        return ResultUtil.success(importService.listRealtimeCandidateFactorSnapshotsV3(
+                stockInfoVo.getStockCode(), stockInfoVo.getTradeDate()));
+    }
+
+    @PostMapping("/prepareSnapshotsV3/start")
+    public ResultData<SnapshotTaskProgress> startPrepareSnapshotsV3(@RequestBody StockInfoVo stockInfoVo) {
+        LocalDate tradeDate = stockInfoVo == null ? null : stockInfoVo.getTradeDate();
+        return ResultUtil.success(importService.startPrepareSnapshotsV3(tradeDate));
+    }
+
+    @GetMapping("/prepareSnapshotsV3/progress")
+    public ResultData<SnapshotTaskProgress> prepareSnapshotsProgressV3(@RequestParam String taskId) {
+        return ResultUtil.success(importService.getPrepareSnapshotsProgressV3(taskId));
     }
 
     /**

@@ -2,6 +2,7 @@ package org.analyse.analysestock.realtimecandidate.dto;
 
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;

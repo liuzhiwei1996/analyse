@@ -14,14 +14,20 @@ import org.analyse.analysestock.analysis.serivce.ImportService;
 import org.analyse.analysestock.analysis.vo.GenerationMissingDateItem;
 import org.analyse.analysestock.analysis.vo.GenerationMissingDateResponse;
 import org.analyse.analysestock.analysis.vo.MissingStockDataItem;
+import org.analyse.analysestock.analysis.vo.SnapshotTaskProgress;
 import org.analyse.analysestock.config.util.RestTemplateUtil;
 import org.analyse.analysestock.config.util.StockCodeUtil;
 import org.analyse.analysestock.realtimecandidate.calculator.CostCalculator;
 import org.analyse.analysestock.realtimecandidate.calculator.ShortSampleCalculator;
+import org.analyse.analysestock.realtimecandidate.calculator.v3.DailyTrendCalculatorV3;
+import org.analyse.analysestock.realtimecandidate.calculator.v3.SectorMarketCalculatorV3;
+import org.analyse.analysestock.realtimecandidate.calculator.v3.ShortSampleCalculatorV3;
+import org.analyse.analysestock.realtimecandidate.calculator.v3.V3FilterCalculator;
 import org.analyse.analysestock.realtimecandidate.config.CostConfig;
 import org.analyse.analysestock.realtimecandidate.config.RealtimeStrategyConfig;
 import org.analyse.analysestock.realtimecandidate.dto.RealtimeCandidateScoreRecord;
 import org.analyse.analysestock.realtimecandidate.dto.RealtimeFactorSnapshot;
+import org.analyse.analysestock.realtimecandidate.dto.V3FactorSnapshot;
 import org.analyse.analysestock.realtimecandidate.engine.RealtimeCandidateScoreEngine;
 import org.analyse.analysestock.realtimecandidate.engine.RealtimeCandidateScoreEngineV3;
 import org.analyse.analysestock.util.ListUtils;
@@ -42,6 +48,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
@@ -95,6 +102,8 @@ public class ImportServiceImpl implements ImportService {
     @Autowired
     @Qualifier("importExecutor")
     private Executor importExecutor;
+
+    private final Map<String, SnapshotTaskProgress> v3SnapshotTaskProgressMap = new ConcurrentHashMap<>();
 
     private static final String MINUTE_URL = "http://10.0.11.15:5757/BQreal/rds/RDS.do?pkgtype=MinuteKLine&code=%s&min=1&end=%s&count=240";
 
@@ -1267,49 +1276,709 @@ public class ImportServiceImpl implements ImportService {
      */
     @Override
     public java.util.List<RealtimeCandidateScoreResultV3> calculateRealtimeCandidateScoresV3(String stockCode, LocalDate tradeDate) {
+        if (tradeDate == null) tradeDate = LocalDate.now();
+        if (StringUtils.hasText(stockCode) && "ALL".equalsIgnoreCase(stockCode.trim())) {
+            stockCode = null;
+        }
+        if (StringUtils.hasText(stockCode)) {
+            stockCode = normalizeStockCode(stockCode);
+        }
+
         RealtimeCandidateScoreEngineV3 v3Engine = new RealtimeCandidateScoreEngineV3();
         RealtimeStrategyConfig strategyConfig = buildStrategyConfig();
         CostConfig costConfig = buildCostConfig();
 
-        // 加载数据
-        List<PubStockInfo> stockInfos = loadStockInfos(stockCode);
-        if (CollectionUtils.isEmpty(stockInfos)) {
+        List<V3FactorSnapshot> snapshots = buildV3FactorSnapshots(tradeDate, stockCode, strategyConfig);
+        if (CollectionUtils.isEmpty(snapshots)) {
+            log.warn("V3: no factor snapshots found, date={}, stockCode={}", tradeDate, stockCode);
             return Collections.emptyList();
         }
 
-        LocalDate dataStartDate = tradeDate.minusDays(strategyConfig.getMinuteLookbackDays() + 30);
-        List<StockDataDailyAll> dailyBars = loadDailyBars(stockCode, dataStartDate, tradeDate);
-        List<StockMinuteData> minuteBars = loadMinuteBars(stockCode, dataStartDate, tradeDate);
-
-        return v3Engine.calculateWithEntities(tradeDate, dailyBars, minuteBars, stockInfos, strategyConfig, costConfig);
+        List<RealtimeCandidateScoreResultV3> records = v3Engine.calculateWithSnapshots(
+                tradeDate, snapshots, strategyConfig, costConfig);
+        saveRealtimeCandidateScoreResultsV3(tradeDate, stockCode, records);
+        return records;
     }
+
+    @Override
+    public List<V3FactorSnapshot> listRealtimeCandidateFactorSnapshotsV3(String stockCode, LocalDate tradeDate) {
+        if (tradeDate == null) tradeDate = LocalDate.now();
+        if (StringUtils.hasText(stockCode) && "ALL".equalsIgnoreCase(stockCode.trim())) {
+            stockCode = null;
+        }
+        if (StringUtils.hasText(stockCode)) {
+            stockCode = normalizeStockCode(stockCode);
+        }
+
+        return buildV3FactorSnapshots(tradeDate, stockCode, buildStrategyConfig());
+    }
+
+    @Override
+    public SnapshotTaskProgress startPrepareSnapshotsV3(LocalDate tradeDate) {
+        if (tradeDate == null) tradeDate = LocalDate.now();
+        LocalDate finalTradeDate = tradeDate;
+
+        SnapshotTaskProgress runningTask = findRunningV3SnapshotTask(finalTradeDate);
+        if (runningTask != null) {
+            return runningTask;
+        }
+
+        String taskId = "V3-SNAPSHOT-" + finalTradeDate + "-" + System.currentTimeMillis();
+        SnapshotTaskProgress progress = SnapshotTaskProgress.create(taskId, finalTradeDate);
+        v3SnapshotTaskProgressMap.put(taskId, progress);
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                prepareTailTradeSnapshotV3(finalTradeDate, progress);
+                prepareShortSampleStatsV3(finalTradeDate, progress);
+                progress.startStage("MARKET_CONTEXT", 1, "正在生成 V3 市场和板块环境快照");
+                prepareMarketContextSnapshotV3(finalTradeDate);
+                progress.update(1, 1, "V3 市场和板块环境快照生成完成");
+                progress.complete("V3 快照生成完成");
+            } catch (Exception e) {
+                log.error("V3: async snapshot task failed, date={}, taskId={}", finalTradeDate, taskId, e);
+                progress.fail(e);
+            }
+        }, importExecutor);
+
+        return progress;
+    }
+
+    @Override
+    public SnapshotTaskProgress getPrepareSnapshotsProgressV3(String taskId) {
+        if (!StringUtils.hasText(taskId)) {
+            return SnapshotTaskProgress.notFound(taskId);
+        }
+        return v3SnapshotTaskProgressMap.getOrDefault(taskId, SnapshotTaskProgress.notFound(taskId));
+    }
+
+    private SnapshotTaskProgress findRunningV3SnapshotTask(LocalDate tradeDate) {
+        return v3SnapshotTaskProgressMap.values().stream()
+                .filter(progress -> tradeDate.equals(progress.getTradeDate()))
+                .filter(progress -> "RUNNING".equals(progress.getStatus()))
+                .findFirst()
+                .orElse(null);
+    }
+
 
     /**
      * 准备 V3 增强尾盘快照。
      */
     @Override
     public void prepareTailTradeSnapshotV3(LocalDate tradeDate) {
-        log.info("V3: 准备尾盘快照, tradeDate={}", tradeDate);
-        // TODO: 从分钟线数据生成增强快照并保存到 stock_tail_trade_snapshot_v3
-        // 这里需要读取 T 日和 T+1 日的分钟线来填充所有窗口数据
+        prepareTailTradeSnapshotV3(tradeDate, null);
     }
+
+    private void prepareTailTradeSnapshotV3(LocalDate tradeDate, SnapshotTaskProgress progress) {
+        if (tradeDate == null) tradeDate = LocalDate.now();
+        log.info("V3: prepare tail snapshots, date={}", tradeDate);
+        stockTailTradeSnapshotV3Mapper.deleteByTradeDate(tradeDate);
+
+        List<PubStockInfo> stockInfos = pubStockInfoMapper.selectList(null);
+        if (CollectionUtils.isEmpty(stockInfos)) return;
+        if (progress != null) {
+            progress.startStage("TAIL_SNAPSHOT", stockInfos.size(), "正在生成 V3 尾盘快照");
+        }
+
+        LocalDate finalTradeDate = tradeDate;
+        AtomicInteger processed = new AtomicInteger(0);
+        AtomicInteger generated = new AtomicInteger(0);
+        List<CompletableFuture<StockTailTradeSnapshotV3>> futures = stockInfos.stream()
+                .map(info -> CompletableFuture.supplyAsync(() -> {
+                    String stockCode = info.getSymbol();
+                    List<StockMinuteData> stockMinutes = loadMinuteBars(stockCode, finalTradeDate, finalTradeDate);
+                    int currentProcessed = processed.incrementAndGet();
+                    if (CollectionUtils.isEmpty(stockMinutes)) {
+                        if (progress != null) {
+                            progress.update(currentProcessed, generated.get(), null);
+                        }
+                        if (currentProcessed % 500 == 0) {
+                            log.info("V3: tail snapshot progress, date={}, processed={}, generated={}",
+                                    finalTradeDate, currentProcessed, generated.get());
+                        }
+                        return null;
+                    }
+
+                    StockTailTradeSnapshotV3 snapshot = buildTailTradeSnapshotV3(stockCode, finalTradeDate, stockMinutes);
+                    int currentGenerated = generated.incrementAndGet();
+                    if (progress != null) {
+                        progress.update(currentProcessed, currentGenerated, null);
+                    }
+                    if (currentProcessed % 500 == 0) {
+                        log.info("V3: tail snapshot progress, date={}, processed={}, generated={}",
+                                finalTradeDate, currentProcessed, currentGenerated);
+                    }
+                    return snapshot;
+                }, importExecutor))
+                .collect(Collectors.toList());
+
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        List<StockTailTradeSnapshotV3> snapshots = futures.stream()
+                .map(CompletableFuture::join)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+
+        ListUtils.splitListByCount(snapshots, 500).forEach(stockTailTradeSnapshotV3Mapper::insertBatch);
+        if (progress != null) {
+            progress.update(stockInfos.size(), snapshots.size(), "V3 尾盘快照生成完成");
+        }
+        log.info("V3: tail snapshots prepared, date={}, count={}", tradeDate, snapshots.size());
+    }
+
 
     /**
      * 准备 V3 短样本统计。
      */
     @Override
     public void prepareShortSampleStatsV3(LocalDate tradeDate) {
-        log.info("V3: 准备短样本统计, tradeDate={}", tradeDate);
-        // TODO: 为每只股票计算基于分阶段买卖规则的历史短样本统计
+        prepareShortSampleStatsV3(tradeDate, null);
     }
+
+    private void prepareShortSampleStatsV3(LocalDate tradeDate, SnapshotTaskProgress progress) {
+        if (tradeDate == null) tradeDate = LocalDate.now();
+        log.info("V3: prepare short sample stats, date={}", tradeDate);
+        stockShortSampleStatsV3Mapper.deleteByTradeDate(tradeDate);
+
+        RealtimeStrategyConfig strategyConfig = buildStrategyConfig();
+        CostConfig costConfig = buildCostConfig();
+        LocalDate startDate = tradeDate.minusDays(strategyConfig.getMinuteLookbackDays() + 30);
+
+        List<PubStockInfo> stockInfos = pubStockInfoMapper.selectList(null);
+        if (CollectionUtils.isEmpty(stockInfos)) return;
+        if (progress != null) {
+            progress.startStage("SHORT_SAMPLE", stockInfos.size(), "正在生成 V3 短样本统计");
+        }
+
+        Map<String, List<StockTailTradeSnapshotV3>> tailMap = loadTailSnapshotHistoryV3(startDate, tradeDate);
+
+        LocalDate finalTradeDate = tradeDate;
+        LocalDate finalStartDate = startDate;
+        CostConfig finalCostConfig = costConfig;
+        AtomicInteger processed = new AtomicInteger(0);
+        AtomicInteger generated = new AtomicInteger(0);
+        List<CompletableFuture<StockShortSampleStatsV3>> futures = stockInfos.stream()
+                .map(info -> CompletableFuture.supplyAsync(() -> {
+                    String stockCode = info.getSymbol();
+                    String normalizedCode = normalizeStockCode(stockCode);
+                    V3FactorSnapshot snapshot = new V3FactorSnapshot();
+                    ShortSampleCalculatorV3 calculator = new ShortSampleCalculatorV3();
+
+                    List<StockTailTradeSnapshotV3> tailSnapshots = tailMap.getOrDefault(normalizedCode, Collections.emptyList());
+                    if (!tailSnapshots.isEmpty()) {
+                        calculator.calculateFromSnapshots(snapshot, tailSnapshots, finalCostConfig, finalTradeDate);
+                    } else {
+                        List<StockMinuteData> stockMinutes = loadMinuteBars(stockCode, finalStartDate, finalTradeDate.minusDays(1));
+                        calculator.calculateForStockMinutes(snapshot, stockMinutes, finalCostConfig, finalTradeDate);
+                    }
+
+                    int currentProcessed = processed.incrementAndGet();
+                    if (snapshot.getShortSampleCount() == null || snapshot.getShortSampleCount() <= 0) {
+                        if (progress != null) {
+                            progress.update(currentProcessed, generated.get(), null);
+                        }
+                        if (currentProcessed % 500 == 0) {
+                            log.info("V3: short sample progress, date={}, processed={}, generated={}",
+                                    finalTradeDate, currentProcessed, generated.get());
+                        }
+                        return null;
+                    }
+
+                    StockShortSampleStatsV3 stats = buildShortSampleStatsV3(stockCode, finalTradeDate, snapshot);
+                    int currentGenerated = generated.incrementAndGet();
+                    if (progress != null) {
+                        progress.update(currentProcessed, currentGenerated, null);
+                    }
+                    if (currentProcessed % 500 == 0) {
+                        log.info("V3: short sample progress, date={}, processed={}, generated={}",
+                                finalTradeDate, currentProcessed, currentGenerated);
+                    }
+                    return stats;
+                }, importExecutor))
+                .collect(Collectors.toList());
+
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        List<StockShortSampleStatsV3> statsList = futures.stream()
+                .map(CompletableFuture::join)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+
+        ListUtils.splitListByCount(statsList, 500).forEach(stockShortSampleStatsV3Mapper::insertBatch);
+        if (progress != null) {
+            progress.update(stockInfos.size(), statsList.size(), "V3 短样本统计生成完成");
+        }
+        log.info("V3: short sample stats prepared, date={}, count={}", tradeDate, statsList.size());
+    }
+
 
     /**
      * 准备 V3 市场环境快照。
      */
     @Override
     public void prepareMarketContextSnapshotV3(LocalDate tradeDate) {
-        log.info("V3: 准备市场环境快照, tradeDate={}", tradeDate);
-        // TODO: 计算全市场和板块级别的环境指标并保存
+        if (tradeDate == null) tradeDate = LocalDate.now();
+        log.info("V3: prepare market context snapshots, date={}", tradeDate);
+        marketContextSnapshotV3Mapper.deleteByTradeDate(tradeDate);
+        sectorContextSnapshotV3Mapper.deleteByTradeDate(tradeDate);
+
+        List<StockTailTradeSnapshotV3> tails = stockTailTradeSnapshotV3Mapper.selectList(
+                new LambdaQueryWrapper<StockTailTradeSnapshotV3>()
+                        .eq(StockTailTradeSnapshotV3::getTradeDate, tradeDate)
+                        .eq(StockTailTradeSnapshotV3::getValidFlag, true));
+        if (CollectionUtils.isEmpty(tails)) {
+            log.warn("V3: no valid tail snapshots for market context, date={}", tradeDate);
+            return;
+        }
+
+        List<StockDataDailyAll> dailyBars = loadDailyBars(null, tradeDate.minusDays(10), tradeDate);
+        Map<String, List<StockDataDailyAll>> dailyMap = dailyBars.stream()
+                .collect(Collectors.groupingBy(StockDataDailyAll::getStockCode));
+        Map<String, PubStockInfo> infoMap = pubStockInfoMapper.selectList(null).stream()
+                .collect(Collectors.toMap(PubStockInfo::getSymbol, i -> i, (a, b) -> a));
+
+        List<V3FactorSnapshot> snapshots = new ArrayList<>();
+        for (StockTailTradeSnapshotV3 tail : tails) {
+            PubStockInfo info = infoMap.get(tail.getStockCode());
+            if (info == null) continue;
+
+            V3FactorSnapshot snapshot = buildBaseSnapshotFromTailV3(tail, info);
+            fillPreviousClose(snapshot, dailyMap.getOrDefault(tail.getStockCode(), Collections.emptyList()), tradeDate);
+            if (snapshot.getReturnTo1430() != null) {
+                snapshots.add(snapshot);
+            }
+        }
+        if (snapshots.isEmpty()) return;
+
+        saveMarketContextV3(tradeDate, snapshots, tails.size());
+        saveSectorContextV3(tradeDate, snapshots);
+    }
+
+
+
+    private List<V3FactorSnapshot> buildV3FactorSnapshots(
+            LocalDate tradeDate,
+            String stockCode,
+            RealtimeStrategyConfig strategyConfig) {
+
+        List<PubStockInfo> stockInfos = loadStockInfos(stockCode);
+        if (CollectionUtils.isEmpty(stockInfos)) return Collections.emptyList();
+
+        Map<String, PubStockInfo> infoMap = stockInfos.stream()
+                .collect(Collectors.toMap(PubStockInfo::getSymbol, i -> i, (a, b) -> a));
+
+        LambdaQueryWrapper<StockTailTradeSnapshotV3> tailQuery = new LambdaQueryWrapper<>();
+        tailQuery.eq(StockTailTradeSnapshotV3::getTradeDate, tradeDate)
+                .eq(StockTailTradeSnapshotV3::getValidFlag, true);
+        if (StringUtils.hasText(stockCode)) {
+            tailQuery.eq(StockTailTradeSnapshotV3::getStockCode, stockCode);
+        }
+        List<StockTailTradeSnapshotV3> tails = stockTailTradeSnapshotV3Mapper.selectList(tailQuery);
+        if (CollectionUtils.isEmpty(tails)) return Collections.emptyList();
+
+        LocalDate dataStartDate = tradeDate.minusDays(strategyConfig.getMinuteLookbackDays() + 30);
+        Map<String, List<StockDataDailyAll>> dailyMap = loadDailyBars(stockCode, dataStartDate, tradeDate).stream()
+                .collect(Collectors.groupingBy(StockDataDailyAll::getStockCode));
+
+        Map<String, StockShortSampleStatsV3> shortStatsMap = loadShortSampleStatsV3(stockCode, tradeDate);
+        MarketContextSnapshotV3 marketContext = loadMarketContextV3(tradeDate);
+        Map<String, SectorContextSnapshotV3> sectorContextMap = loadSectorContextV3(tradeDate);
+
+        DailyTrendCalculatorV3 dailyTrendCalculator = new DailyTrendCalculatorV3();
+        V3FilterCalculator filterCalculator = new V3FilterCalculator();
+
+        List<V3FactorSnapshot> snapshots = new ArrayList<>();
+        for (StockTailTradeSnapshotV3 tail : tails) {
+            PubStockInfo info = infoMap.get(tail.getStockCode());
+            if (info == null) continue;
+
+            V3FactorSnapshot snapshot = buildBaseSnapshotFromTailV3(tail, info);
+            List<StockDataDailyAll> sDaily = dailyMap.getOrDefault(tail.getStockCode(), Collections.emptyList());
+            dailyTrendCalculator.calculate(snapshot, sDaily, tradeDate);
+            fillPreviousClose(snapshot, sDaily, tradeDate);
+
+            if (!filterCalculator.apply(snapshot, info, strategyConfig, tradeDate)) {
+                continue;
+            }
+
+            applyShortSampleStatsV3(snapshot, shortStatsMap.get(tail.getStockCode()));
+            applyMarketContextV3(snapshot, marketContext);
+            applySectorContextV3(snapshot, sectorContextMap.get(info.getSector()));
+            snapshots.add(snapshot);
+        }
+        return snapshots;
+    }
+
+    private V3FactorSnapshot buildBaseSnapshotFromTailV3(StockTailTradeSnapshotV3 tail, PubStockInfo info) {
+        V3FactorSnapshot snapshot = new V3FactorSnapshot();
+        snapshot.setStockCode(tail.getStockCode());
+        snapshot.setTradeDate(tail.getTradeDate());
+        snapshot.setShortName(info.getShortName());
+        snapshot.setMarket(info.getMarkets());
+        snapshot.setSector(info.getSector());
+        snapshot.setPrice1400(tail.getPrice1400());
+        snapshot.setPrice1430(tail.getPrice1430());
+        snapshot.setTodayTailAmount(tail.getTailAmount14001430());
+        snapshot.setAmountBefore1430(tail.getAmountBefore1430());
+        snapshot.setIntradayLowBefore1430(tail.getLowBefore1430());
+        snapshot.setIntradayHighBefore1430(tail.getHighBefore1430());
+
+        if (tail.getPrice1400() != null && tail.getPrice1400().compareTo(BigDecimal.ZERO) > 0
+                && tail.getPrice1430() != null) {
+            snapshot.setTailMomentum(tail.getPrice1430()
+                    .divide(tail.getPrice1400(), 6, RoundingMode.HALF_UP)
+                    .subtract(BigDecimal.ONE));
+        }
+        if (tail.getHighBefore1430() != null && tail.getLowBefore1430() != null && tail.getPrice1430() != null) {
+            BigDecimal range = tail.getHighBefore1430().subtract(tail.getLowBefore1430());
+            if (range.compareTo(BigDecimal.ZERO) > 0) {
+                snapshot.setIntradayPosition(tail.getPrice1430().subtract(tail.getLowBefore1430())
+                        .divide(range, 4, RoundingMode.HALF_UP));
+            } else {
+                snapshot.setIntradayPosition(new BigDecimal("0.5"));
+            }
+        }
+        return snapshot;
+    }
+
+    private void fillPreviousClose(V3FactorSnapshot snapshot, List<StockDataDailyAll> dailyBars, LocalDate tradeDate) {
+        StockDataDailyAll prevDayK = dailyBars.stream()
+                .filter(d -> d.getTradeDate() != null && d.getTradeDate().isBefore(tradeDate))
+                .max(Comparator.comparing(StockDataDailyAll::getTradeDate))
+                .orElse(null);
+        if (prevDayK == null || prevDayK.getCloseForead() == null || prevDayK.getCloseForead().compareTo(BigDecimal.ZERO) <= 0) {
+            return;
+        }
+        snapshot.setClosePrevious(prevDayK.getCloseForead());
+        if (snapshot.getPrice1430() != null) {
+            snapshot.setReturnTo1430(snapshot.getPrice1430()
+                    .divide(prevDayK.getCloseForead(), 6, RoundingMode.HALF_UP)
+                    .subtract(BigDecimal.ONE));
+        }
+    }
+
+    private void applyShortSampleStatsV3(V3FactorSnapshot snapshot, StockShortSampleStatsV3 stats) {
+        if (stats == null) {
+            snapshot.setShortSampleCount(0);
+            return;
+        }
+        snapshot.setShortSampleCount(stats.getSampleCount());
+        snapshot.setBuyFillRate(stats.getBuyFillRate());
+        snapshot.setBuy3PctFillRate(stats.getBuy3PctFillRate());
+        snapshot.setBuy2PctFillRate(stats.getBuy2PctFillRate());
+        snapshot.setBuy1PctFillRate(stats.getBuy1PctFillRate());
+        snapshot.setNotFilledRate(stats.getNotFilledRate());
+        snapshot.setTakeProfit1PctRate(stats.getTakeProfit1PctRate());
+        snapshot.setTakeProfit2PctRate(stats.getTakeProfit2PctRate());
+        snapshot.setTakeProfit3PctRate(stats.getTakeProfit3PctRate());
+        snapshot.setForceSellRate(stats.getForceSellRate());
+        snapshot.setAvgNetReturnBps(stats.getAvgNetReturnBps());
+        snapshot.setShortAvgNetReturnBps(stats.getAvgNetReturnBps());
+        snapshot.setAvgGrossReturnBps(stats.getAvgGrossReturnBps());
+        snapshot.setAvgTakeProfitReturnBps(stats.getAvgTakeProfitReturnBps());
+        snapshot.setAvgForceSellReturnBps(stats.getAvgForceSellReturnBps());
+        snapshot.setMaxLossBps(stats.getMaxLossBps());
+        snapshot.setBuy3PctAvgNetReturnBps(stats.getBuy3PctAvgNetReturnBps());
+        snapshot.setBuy2PctAvgNetReturnBps(stats.getBuy2PctAvgNetReturnBps());
+        snapshot.setBuy1PctAvgNetReturnBps(stats.getBuy1PctAvgNetReturnBps());
+        snapshot.setPostBuyDrawdownAvg(stats.getPostBuyDrawdownAvg());
+        snapshot.setForceSellLossRate(stats.getForceSellLossRate());
+        snapshot.setShortRawWinRate(stats.getRawWinRate());
+        snapshot.setShortAdjustedWinRate(stats.getAdjustedWinRate());
+    }
+
+    private void applyMarketContextV3(V3FactorSnapshot snapshot, MarketContextSnapshotV3 marketContext) {
+        if (marketContext == null) return;
+        snapshot.setMarketBreadth(marketContext.getMarketBreadth1430());
+        snapshot.setMarketReturn1430(marketContext.getMarketReturn1430());
+        snapshot.setMarketRegime(marketContext.getMarketRegime());
+    }
+
+    private void applySectorContextV3(V3FactorSnapshot snapshot, SectorContextSnapshotV3 sectorContext) {
+        if (sectorContext == null) return;
+        snapshot.setSectorStrength(sectorContext.getSectorStrength1430());
+        snapshot.setSectorBreadth(sectorContext.getSectorBreadth1430());
+        snapshot.setSectorRank(sectorContext.getSectorRank());
+        if (snapshot.getReturnTo1430() != null && sectorContext.getSectorStrength1430() != null) {
+            snapshot.setRelativeStrength1430(snapshot.getReturnTo1430().subtract(sectorContext.getSectorStrength1430()));
+        }
+    }
+
+    private Map<String, StockShortSampleStatsV3> loadShortSampleStatsV3(String stockCode, LocalDate tradeDate) {
+        LambdaQueryWrapper<StockShortSampleStatsV3> query = new LambdaQueryWrapper<>();
+        query.eq(StockShortSampleStatsV3::getTradeDate, tradeDate);
+        if (StringUtils.hasText(stockCode)) query.eq(StockShortSampleStatsV3::getStockCode, stockCode);
+        return stockShortSampleStatsV3Mapper.selectList(query).stream()
+                .collect(Collectors.toMap(StockShortSampleStatsV3::getStockCode, s -> s, (a, b) -> a));
+    }
+
+    private MarketContextSnapshotV3 loadMarketContextV3(LocalDate tradeDate) {
+        return marketContextSnapshotV3Mapper.selectOne(
+                new LambdaQueryWrapper<MarketContextSnapshotV3>()
+                        .eq(MarketContextSnapshotV3::getTradeDate, tradeDate));
+    }
+
+    private Map<String, SectorContextSnapshotV3> loadSectorContextV3(LocalDate tradeDate) {
+        return sectorContextSnapshotV3Mapper.selectList(
+                        new LambdaQueryWrapper<SectorContextSnapshotV3>()
+                                .eq(SectorContextSnapshotV3::getTradeDate, tradeDate))
+                .stream()
+                .collect(Collectors.toMap(SectorContextSnapshotV3::getSectorName, s -> s, (a, b) -> a));
+    }
+
+    private void saveRealtimeCandidateScoreResultsV3(
+            LocalDate tradeDate,
+            String stockCode,
+            List<RealtimeCandidateScoreResultV3> records) {
+        if (StringUtils.hasText(stockCode)) {
+            log.info("V3: single stock score is not persisted, date={}, stockCode={}", tradeDate, stockCode);
+            return;
+        }
+        if (CollectionUtils.isEmpty(records)) {
+            log.warn("V3: empty market score result, skip persist, date={}", tradeDate);
+            return;
+        }
+        realtimeCandidateScoreResultV3Mapper.deleteByTradeDateAndStrategyVersion(
+                tradeDate, RealtimeCandidateScoreEngineV3.STRATEGY_VERSION);
+        ListUtils.splitListByCount(records, 500).forEach(realtimeCandidateScoreResultV3Mapper::insertBatch);
+        log.info("V3: score results persisted, date={}, count={}", tradeDate, records.size());
+    }
+
+    private StockTailTradeSnapshotV3 buildTailTradeSnapshotV3(
+            String stockCode,
+            LocalDate tradeDate,
+            List<StockMinuteData> minutes) {
+        StockTailTradeSnapshotV3 snapshot = new StockTailTradeSnapshotV3();
+        snapshot.setStockCode(stockCode);
+        snapshot.setTradeDate(tradeDate);
+        snapshot.setCreatedAt(LocalDateTime.now());
+        snapshot.setUpdatedAt(LocalDateTime.now());
+
+        BigDecimal amountBefore1430 = BigDecimal.ZERO;
+        long volumeBefore1430 = 0L;
+        BigDecimal tailAmount = BigDecimal.ZERO;
+        long tailVolume = 0L;
+        BigDecimal closeAmount = BigDecimal.ZERO;
+        BigDecimal sellAmount = BigDecimal.ZERO;
+        long sellVolume = 0L;
+        StockMinuteData closeMinute = null;
+
+        for (StockMinuteData minute : minutes) {
+            if (minute.getTime() == null) continue;
+            int time = minute.getTime();
+            BigDecimal amount = minute.getMinuteAmount() != null ? minute.getMinuteAmount() : BigDecimal.ZERO;
+            long volume = minute.getMinuteVolume() != null ? minute.getMinuteVolume() : 0L;
+            closeAmount = closeAmount.add(amount);
+
+            if (closeMinute == null || time > closeMinute.getTime()) {
+                closeMinute = minute;
+            }
+            if (time == 1400) snapshot.setPrice1400(minute.getPrice());
+            if (time == 1430) snapshot.setPrice1430(minute.getPrice());
+            if (time == 945) snapshot.setPrice0945(minute.getPrice());
+
+            if (time <= 1430) {
+                amountBefore1430 = amountBefore1430.add(amount);
+                volumeBefore1430 += volume;
+                snapshot.setHighBefore1430(max(snapshot.getHighBefore1430(), minute.getHighPrice()));
+                snapshot.setLowBefore1430(min(snapshot.getLowBefore1430(), minute.getLowPrice()));
+            }
+            if (time >= 1400 && time <= 1430) {
+                tailAmount = tailAmount.add(amount);
+                tailVolume += volume;
+            }
+            if (time >= 1435 && time <= 1444) {
+                snapshot.setLow14351444(min(snapshot.getLow14351444(), minute.getLowPrice()));
+            } else if (time >= 1445 && time <= 1454) {
+                snapshot.setLow14451454(min(snapshot.getLow14451454(), minute.getLowPrice()));
+            } else if (time >= 1455 && time <= 1500) {
+                snapshot.setLow14551500(min(snapshot.getLow14551500(), minute.getLowPrice()));
+            }
+            if (time >= 930 && time <= 935) {
+                snapshot.setHigh09300935(max(snapshot.getHigh09300935(), minute.getHighPrice()));
+            } else if (time >= 936 && time <= 940) {
+                snapshot.setHigh09360940(max(snapshot.getHigh09360940(), minute.getHighPrice()));
+            } else if (time >= 941 && time <= 944) {
+                snapshot.setHigh09410944(max(snapshot.getHigh09410944(), minute.getHighPrice()));
+            }
+            if (time >= 930 && time <= 945) {
+                sellAmount = sellAmount.add(amount);
+                sellVolume += volume;
+            }
+        }
+
+        snapshot.setAmountBefore1430(amountBefore1430);
+        snapshot.setVolumeBefore1430(volumeBefore1430);
+        snapshot.setTailAmount14001430(tailAmount);
+        snapshot.setTailVolume14001430(tailVolume);
+        snapshot.setCloseAmount(closeAmount);
+        if (closeMinute != null) snapshot.setClosePrice(closeMinute.getPrice());
+        snapshot.setSellAmount09300945(sellAmount);
+        snapshot.setSellVolume09300945(sellVolume);
+        if (sellVolume > 0 && sellAmount.compareTo(BigDecimal.ZERO) > 0) {
+            BigDecimal shares = BigDecimal.valueOf(sellVolume).multiply(BigDecimal.valueOf(100));
+            snapshot.setVwap09300945(sellAmount.divide(shares, 4, RoundingMode.HALF_UP));
+        }
+
+        boolean valid = snapshot.getPrice1400() != null && snapshot.getPrice1430() != null;
+        snapshot.setValidFlag(valid);
+        if (!valid) {
+            snapshot.setInvalidReason(snapshot.getPrice1400() == null ? "MISSING_1400_PRICE" : "MISSING_1430_PRICE");
+        }
+        return snapshot;
+    }
+
+    private Map<String, List<StockTailTradeSnapshotV3>> loadTailSnapshotHistoryV3(LocalDate startDate, LocalDate tradeDate) {
+        List<StockTailTradeSnapshotV3> list = stockTailTradeSnapshotV3Mapper.selectList(
+                new LambdaQueryWrapper<StockTailTradeSnapshotV3>()
+                        .ge(StockTailTradeSnapshotV3::getTradeDate, startDate)
+                        .lt(StockTailTradeSnapshotV3::getTradeDate, tradeDate)
+                        .eq(StockTailTradeSnapshotV3::getValidFlag, true));
+        return list.stream().collect(Collectors.groupingBy(s -> normalizeStockCode(s.getStockCode())));
+    }
+
+    private StockShortSampleStatsV3 buildShortSampleStatsV3(String stockCode, LocalDate tradeDate, V3FactorSnapshot snapshot) {
+        StockShortSampleStatsV3 stats = new StockShortSampleStatsV3();
+        stats.setStockCode(stockCode);
+        stats.setTradeDate(tradeDate);
+        stats.setBuyFillRate(snapshot.getBuyFillRate());
+        stats.setBuy3PctFillRate(snapshot.getBuy3PctFillRate());
+        stats.setBuy2PctFillRate(snapshot.getBuy2PctFillRate());
+        stats.setBuy1PctFillRate(snapshot.getBuy1PctFillRate());
+        stats.setNotFilledRate(snapshot.getNotFilledRate());
+        stats.setTakeProfit1PctRate(snapshot.getTakeProfit1PctRate());
+        stats.setTakeProfit2PctRate(snapshot.getTakeProfit2PctRate());
+        stats.setTakeProfit3PctRate(snapshot.getTakeProfit3PctRate());
+        stats.setForceSellRate(snapshot.getForceSellRate());
+        stats.setAvgNetReturnBps(snapshot.getAvgNetReturnBps());
+        stats.setAvgGrossReturnBps(snapshot.getAvgGrossReturnBps());
+        stats.setAvgTakeProfitReturnBps(snapshot.getAvgTakeProfitReturnBps());
+        stats.setAvgForceSellReturnBps(snapshot.getAvgForceSellReturnBps());
+        stats.setMaxLossBps(snapshot.getMaxLossBps());
+        stats.setBuy3PctAvgNetReturnBps(snapshot.getBuy3PctAvgNetReturnBps());
+        stats.setBuy2PctAvgNetReturnBps(snapshot.getBuy2PctAvgNetReturnBps());
+        stats.setBuy1PctAvgNetReturnBps(snapshot.getBuy1PctAvgNetReturnBps());
+        stats.setPostBuyDrawdownAvg(snapshot.getPostBuyDrawdownAvg());
+        stats.setForceSellLossRate(snapshot.getForceSellLossRate());
+        stats.setRawWinRate(snapshot.getShortRawWinRate());
+        stats.setAdjustedWinRate(snapshot.getShortAdjustedWinRate());
+        stats.setSampleCount(snapshot.getShortSampleCount());
+        stats.setCreatedAt(LocalDateTime.now());
+        return stats;
+    }
+
+    private void saveMarketContextV3(LocalDate tradeDate, List<V3FactorSnapshot> snapshots, int totalTailCount) {
+        List<BigDecimal> returns = snapshots.stream()
+                .map(V3FactorSnapshot::getReturnTo1430)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+        long upCount = returns.stream().filter(r -> r.compareTo(BigDecimal.ZERO) > 0).count();
+        long strongCount = returns.stream().filter(r -> r.compareTo(new BigDecimal("0.02")) >= 0).count();
+        long weakCount = returns.stream().filter(r -> r.compareTo(new BigDecimal("-0.02")) <= 0).count();
+        long limitUpCount = returns.stream().filter(r -> r.compareTo(new BigDecimal("0.095")) > 0).count();
+        long limitDownCount = returns.stream().filter(r -> r.compareTo(new BigDecimal("-0.095")) < 0).count();
+
+        BigDecimal marketBreadth = rate(upCount, returns.size());
+        MarketContextSnapshotV3 market = new MarketContextSnapshotV3();
+        market.setTradeDate(tradeDate);
+        market.setMarketBreadth1430(marketBreadth);
+        market.setMarketReturn1430(avg(returns));
+        market.setMarketStrongStockRatio(rate(strongCount, returns.size()));
+        market.setMarketWeakStockRatio(rate(weakCount, returns.size()));
+        market.setLimitUpCount((int) limitUpCount);
+        market.setLimitDownCount((int) limitDownCount);
+        market.setMarketRegime(new SectorMarketCalculatorV3().determineMarketRegime(marketBreadth));
+        market.setTotalValidStocks(totalTailCount);
+        market.setTotalFilteredStocks(snapshots.size());
+        market.setCreatedAt(LocalDateTime.now());
+        marketContextSnapshotV3Mapper.insert(market);
+    }
+
+    private void saveSectorContextV3(LocalDate tradeDate, List<V3FactorSnapshot> snapshots) {
+        Map<String, List<V3FactorSnapshot>> sectorGroups = snapshots.stream()
+                .filter(s -> s.getSector() != null)
+                .collect(Collectors.groupingBy(V3FactorSnapshot::getSector));
+
+        List<SectorContextSnapshotV3> sectors = new ArrayList<>();
+        for (Map.Entry<String, List<V3FactorSnapshot>> entry : sectorGroups.entrySet()) {
+            List<V3FactorSnapshot> sectorStocks = entry.getValue();
+            List<BigDecimal> returns = sectorStocks.stream()
+                    .map(V3FactorSnapshot::getReturnTo1430)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+            long upCount = returns.stream().filter(r -> r.compareTo(BigDecimal.ZERO) > 0).count();
+
+            SectorContextSnapshotV3 sector = new SectorContextSnapshotV3();
+            sector.setTradeDate(tradeDate);
+            sector.setSectorName(entry.getKey());
+            sector.setSectorStrength1430(avg(returns));
+            sector.setSectorBreadth1430(rate(upCount, returns.size()));
+            sector.setSectorVolumeRatio(avg(sectorStocks.stream()
+                    .map(V3FactorSnapshot::getTailAmountRatio)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList())));
+            sector.setStockCount(sectorStocks.size());
+            sector.setCreatedAt(LocalDateTime.now());
+            sectors.add(sector);
+        }
+
+        sectors.sort((a, b) -> {
+            BigDecimal av = a.getSectorStrength1430() != null ? a.getSectorStrength1430() : BigDecimal.ZERO;
+            BigDecimal bv = b.getSectorStrength1430() != null ? b.getSectorStrength1430() : BigDecimal.ZERO;
+            return bv.compareTo(av);
+        });
+        for (int i = 0; i < sectors.size(); i++) {
+            sectors.get(i).setSectorRank(i + 1);
+        }
+        if (!sectors.isEmpty()) {
+            sectorContextSnapshotV3Mapper.insertBatch(sectors);
+        }
+    }
+
+    private Map<String, List<StockMinuteData>> groupMinuteBarsByStockCode(List<StockMinuteData> minuteBars) {
+        if (CollectionUtils.isEmpty(minuteBars)) return Collections.emptyMap();
+        return minuteBars.stream()
+                .filter(m -> m.getStockCode() != null)
+                .collect(Collectors.groupingBy(m -> normalizeStockCode(m.getStockCode())));
+    }
+
+    private String normalizeStockCode(Integer stockCode) {
+        return String.format("%06d", stockCode);
+    }
+
+    private String normalizeStockCode(String stockCode) {
+        if (stockCode == null) return null;
+        String pureStockCode = stockCode.length() > 6 ? stockCode.substring(stockCode.length() - 6) : stockCode;
+        if (pureStockCode.length() < 6) {
+            try {
+                return String.format("%06d", Integer.parseInt(pureStockCode));
+            } catch (NumberFormatException e) {
+                return pureStockCode;
+            }
+        }
+        return pureStockCode;
+    }
+
+    private BigDecimal max(BigDecimal current, BigDecimal candidate) {
+        if (candidate == null) return current;
+        if (current == null || candidate.compareTo(current) > 0) return candidate;
+        return current;
+    }
+
+    private BigDecimal min(BigDecimal current, BigDecimal candidate) {
+        if (candidate == null) return current;
+        if (current == null || candidate.compareTo(current) < 0) return candidate;
+        return current;
+    }
+
+    private BigDecimal avg(List<BigDecimal> values) {
+        List<BigDecimal> valid = values.stream().filter(Objects::nonNull).collect(Collectors.toList());
+        if (valid.isEmpty()) return BigDecimal.ZERO;
+        BigDecimal sum = valid.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+        return sum.divide(BigDecimal.valueOf(valid.size()), 6, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal rate(long numerator, long denominator) {
+        if (denominator <= 0) return BigDecimal.ZERO;
+        return BigDecimal.valueOf(numerator).divide(BigDecimal.valueOf(denominator), 6, RoundingMode.HALF_UP);
     }
 
     /**
@@ -1335,8 +2004,7 @@ public class ImportServiceImpl implements ImportService {
      */
     private List<PubStockInfo> loadStockInfos(String stockCode) {
         if (StringUtils.hasText(stockCode)) {
-            PubStockInfo info = pubStockInfoMapper.selectById(stockCode);
-            return info != null ? Collections.singletonList(info) : Collections.emptyList();
+            return pubStockInfoMapper.findByStockCode(normalizeStockCode(stockCode));
         }
         return pubStockInfoMapper.selectList(new LambdaQueryWrapper<>());
     }

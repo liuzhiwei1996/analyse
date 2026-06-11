@@ -169,11 +169,26 @@
                         </button>
                     </div>
                     <div class="col-md-3 d-flex align-items-end">
+                        <button type="button" class="btn btn-outline-info w-100 py-2 fw-bold" id="btnFactorSnapshots">
+                            <i class="bi bi-table me-1"></i> 查看V3快照因子
+                        </button>
+                    </div>
+                    <div class="col-md-3 d-flex align-items-end">
                         <button type="submit" class="btn btn-primary w-100 py-2 fw-bold" id="btnSubmit">
                             <i class="bi bi-play-fill me-1"></i> 执行计算评分
                         </button>
                     </div>
                 </form>
+                <div id="snapshotProgressPanel" class="mt-4" style="display: none;">
+                    <div class="d-flex align-items-center justify-content-between mb-2">
+                        <span class="text-muted small" id="snapshotProgressText">待开始</span>
+                        <span class="text-muted small batch-progress-label" id="snapshotProgressCount">0 / 0</span>
+                    </div>
+                    <div class="progress" style="height: 20px;">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-info" id="snapshotProgressBar" role="progressbar" style="width: 0%;">0%</div>
+                    </div>
+                    <div class="text-muted small mt-2" id="snapshotProgressMessage">-</div>
+                </div>
             </div>
         </div>
 
@@ -245,7 +260,7 @@
 
         <div id="resultArea" style="display: none;">
             <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
-                <h4 class="m-0 text-dark"><i class="bi bi-list-check me-2"></i>计算结果集</h4>
+                <h4 class="m-0 text-dark"><i class="bi bi-list-check me-2"></i>计算结果</h4>
                 <div class="d-flex flex-wrap align-items-center result-toolbar">
                     <div class="input-group input-group-sm result-search">
                         <span class="input-group-text"><i class="bi bi-search"></i></span>
@@ -307,6 +322,7 @@
     <script>
         let currentResults = [];
         let currentKeyword = '';
+        let currentResultMode = 'score';
 
         function getStrategyVersion() {
             const v3Radio = document.getElementById('strategyV3');
@@ -324,12 +340,35 @@
                 // 清空结果
                 document.getElementById('resultArea').style.display = 'none';
                 currentResults = [];
+                currentResultMode = 'score';
                 updateTableHeader(this.value);
             });
         });
 
         function updateTableHeader(version) {
             const thead = document.querySelector('#resultTable thead tr');
+            if (version === 'V3_FACTORS') {
+                thead.innerHTML = `
+                    <th>交易日期</th>
+                    <th>代码</th>
+                    <th>简称</th>
+                    <th>板块</th>
+                    <th>14:00价格</th>
+                    <th>14:30价格</th>
+                    <th>涨幅到14:30</th>
+                    <th>尾盘动量</th>
+                    <th>日内位置</th>
+                    <th>尾盘金额</th>
+                    <th>20日均额</th>
+                    <th>20日振幅</th>
+                    <th>短样本数</th>
+                    <th>修正胜率</th>
+                    <th>平均净收益bps</th>
+                    <th>市场状态</th>
+                    <th>板块排名</th>
+                `;
+                return;
+            }
             if (version === 'V3') {
                 thead.innerHTML = `
                     <th>交易日期</th>
@@ -429,6 +468,89 @@
             return res;
         }
 
+        function getResponseData(res) {
+            return res && res.data !== undefined ? res.data : res;
+        }
+
+        function delay(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        function getSnapshotStageName(stage) {
+            const names = {
+                QUEUED: '\u7b49\u5f85\u6267\u884c',
+                TAIL_SNAPSHOT: '\u5c3e\u76d8\u5feb\u7167',
+                SHORT_SAMPLE: '\u77ed\u6837\u672c\u7edf\u8ba1',
+                MARKET_CONTEXT: '\u5e02\u573a\u73af\u5883',
+                DONE: '\u5df2\u5b8c\u6210',
+                UNKNOWN: '\u672a\u77e5\u4efb\u52a1'
+            };
+            return names[stage] || stage || '-';
+        }
+
+        function setSnapshotProgress(progress) {
+            const panel = document.getElementById('snapshotProgressPanel');
+            const bar = document.getElementById('snapshotProgressBar');
+            const text = document.getElementById('snapshotProgressText');
+            const count = document.getElementById('snapshotProgressCount');
+            const message = document.getElementById('snapshotProgressMessage');
+            const total = Number(progress && progress.total) || 0;
+            const processed = Number(progress && progress.processed) || 0;
+            const generated = Number(progress && progress.generated) || 0;
+            const percent = progress && progress.status === 'SUCCESS'
+                ? 100
+                : (total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0);
+
+            panel.style.display = 'block';
+            text.textContent = `${progress.tradeDate || '-'} ${getSnapshotStageName(progress.stage)}: ${progress.status || '-'}`;
+            count.textContent = `${processed} / ${total}, \u751f\u6210 ${generated}`;
+            message.textContent = progress.errorMessage || progress.message || '-';
+            bar.style.width = `${percent}%`;
+            bar.textContent = `${percent}%`;
+            bar.classList.remove('bg-info', 'bg-success', 'bg-danger');
+            bar.classList.add(progress.status === 'FAILED' ? 'bg-danger' : (progress.status === 'SUCCESS' ? 'bg-success' : 'bg-info'));
+        }
+
+        async function getV3SnapshotProgress(taskId) {
+            const response = await fetch(`/anlysis/prepareSnapshotsV3/progress?taskId=${encodeURIComponent(taskId)}`);
+            const text = await response.text();
+            const res = text ? JSON.parse(text) : {};
+            if (!response.ok) {
+                throw new Error(res.msg || res.message || `HTTP ${response.status}`);
+            }
+            if (!isSuccessResponse(res)) {
+                throw new Error(res.msg || res.message || '\u67e5\u8be2\u8fdb\u5ea6\u5931\u8d25');
+            }
+            return getResponseData(res);
+        }
+
+        async function runV3SnapshotTask(tradeDate, onProgress) {
+            const startRes = await postJson('/anlysis/prepareSnapshotsV3/start', { tradeDate: tradeDate || null });
+            if (!isSuccessResponse(startRes)) {
+                throw new Error(startRes.msg || startRes.message || '\u542f\u52a8 V3 \u5feb\u7167\u4efb\u52a1\u5931\u8d25');
+            }
+
+            let progress = getResponseData(startRes);
+            if (!progress || !progress.taskId) {
+                throw new Error('\u540e\u7aef\u672a\u8fd4\u56de taskId');
+            }
+            if (onProgress) onProgress(progress);
+
+            while (progress.status === 'RUNNING') {
+                await delay(1000);
+                progress = await getV3SnapshotProgress(progress.taskId);
+                if (onProgress) onProgress(progress);
+            }
+
+            if (progress.status === 'SUCCESS') {
+                return progress;
+            }
+            if (progress.status === 'FAILED') {
+                throw new Error(progress.errorMessage || progress.message || 'V3 \u5feb\u7167\u4efb\u52a1\u5931\u8d25');
+            }
+            throw new Error(progress.message || `V3 \u5feb\u7167\u4efb\u52a1\u72b6\u6001\u5f02\u5e38: ${progress.status}`);
+        }
+
         async function runBatchGenerate() {
             const startDate = document.getElementById('batchStartDate').value;
             const endDate = document.getElementById('batchEndDate').value;
@@ -467,13 +589,20 @@
 
                 if (needSnapshot) {
                     try {
-                        const snapshotUrl = isV3() ? '/anlysis/prepareSnapshotsV3' : '/anlysis/prepareSnapshots';
-                        const snapshotRes = await postJson(snapshotUrl, { tradeDate });
-                        if (isSuccessResponse(snapshotRes)) {
-                            appendBatchLog(`${tradeDate} 快照生成成功`);
+                        if (isV3()) {
+                            const progress = await runV3SnapshotTask(tradeDate, p => {
+                                setBatchProgress(index, dates.length,
+                                    `${tradeDate} ${getSnapshotStageName(p.stage)}: ${p.processed || 0}/${p.total || 0}，生成 ${p.generated || 0}`);
+                            });
+                            appendBatchLog(`${tradeDate} V3 快照生成成功，生成 ${progress.generated || 0} 条`);
                         } else {
-                            daySuccess = false;
-                            appendBatchLog(`${tradeDate} 快照生成失败：${snapshotRes.msg || snapshotRes.message || '未知错误'}`);
+                            const snapshotRes = await postJson('/anlysis/prepareSnapshots', { tradeDate });
+                            if (isSuccessResponse(snapshotRes)) {
+                                appendBatchLog(`${tradeDate} 快照生成成功`);
+                            } else {
+                                daySuccess = false;
+                                appendBatchLog(tradeDate + ' 快照生成失败：' + (snapshotRes.msg || snapshotRes.message || '未知错误'));
+                            }
                         }
                     } catch (error) {
                         daySuccess = false;
@@ -494,7 +623,7 @@
                             appendBatchLog(`${tradeDate} 评分生成成功，返回 ${count} 条`);
                         } else {
                             daySuccess = false;
-                            appendBatchLog(`${tradeDate} 评分生成失败：${scoreRes.msg || scoreRes.message || '未知错误'}`);
+                            appendBatchLog(tradeDate + ' 评分生成失败：' + (scoreRes.msg || scoreRes.message || '未知错误'));
                         }
                     } catch (error) {
                         daySuccess = false;
@@ -559,7 +688,7 @@
             const missingItems = (data.items || []).filter(item => !item.factorGenerated || !item.scoreGenerated);
 
             setBatchProgress(tradeDayCount, tradeDayCount, `检测完成，共 ${tradeDayCount} 个交易日`);
-            appendBatchLog(`检测范围：${data.startDate || '-'} 至 ${data.endDate || '-'}`);
+            appendBatchLog('检测范围：' + (data.startDate || '-') + ' 至 ' + (data.endDate || '-'));
             appendBatchLog(`交易日数量：${tradeDayCount}`);
             appendBatchLog(`因子未生成日期 ${missingFactorDates.length} 天：${formatDateList(missingFactorDates)}`);
             appendBatchLog(`评分报告未生成日期 ${missingScoreDates.length} 天：${formatDateList(missingScoreDates)}`);
@@ -578,7 +707,7 @@
                 if (!item.scoreGenerated) {
                     parts.push('评分报告缺失');
                 }
-                appendBatchLog(`${item.tradeDate} ${parts.join('；')}`);
+                appendBatchLog(item.tradeDate + ' ' + parts.join('；'));
             });
         }
 
@@ -586,34 +715,80 @@
             return dates.length ? dates.join('、') : '无';
         }
 
-        document.getElementById('btnPrepare').addEventListener('click', function() {
+        document.getElementById('btnPrepare').addEventListener('click', async function() {
             const tradeDate = document.getElementById('tradeDate').value;
             const btn = document.getElementById('btnPrepare');
-            const snapshotUrl = isV3() ? '/anlysis/prepareSnapshotsV3' : '/anlysis/prepareSnapshots';
 
             btn.disabled = true;
             btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 生成中...';
 
-            fetch(snapshotUrl, {
+            try {
+                if (isV3()) {
+                    await runV3SnapshotTask(tradeDate, setSnapshotProgress);
+                    alert('V3 因子快照生成成功');
+                } else {
+                    const snapshotRes = await postJson('/anlysis/prepareSnapshots', { tradeDate: tradeDate || null });
+                    if (isSuccessResponse(snapshotRes)) {
+                        alert('因子快照生成成功');
+                    } else {
+                        alert('生成失败: ' + (snapshotRes.msg || snapshotRes.message || '未知错误'));
+                    }
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('生成失败: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-layers-half me-1"></i> 生成因子快照';
+            }
+        });
+
+        document.getElementById('btnFactorSnapshots').addEventListener('click', function() {
+            if (!isV3()) {
+                alert('快照因子明细只支持 V3，请先切换到 V3 交易适配。');
+                return;
+            }
+
+            const stockCode = document.getElementById('stockCode').value.trim();
+            const tradeDate = document.getElementById('tradeDate').value;
+            const btn = document.getElementById('btnFactorSnapshots');
+            const requestData = {
+                stockCode: stockCode || null,
+                tradeDate: tradeDate || null
+            };
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 加载中...';
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('resultArea').style.display = 'none';
+            currentResults = [];
+            currentKeyword = '';
+            currentResultMode = 'factor';
+            document.getElementById('resultSearchInput').value = '';
+            updateTableHeader('V3_FACTORS');
+            updateResultCount(0);
+
+            fetch('/anlysis/factorSnapshotsV3', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tradeDate: tradeDate || null })
+                body: JSON.stringify(requestData)
             })
             .then(response => response.json())
             .then(res => {
                 if (res.result === 1 || res.code === 200) {
-                    alert('因子快照生成成功！');
+                    renderResults(res.data, 'factor');
                 } else {
-                    alert('生成失败: ' + (res.msg || res.message || '未知错误'));
+                    showError('快照因子加载失败: ' + (res.msg || res.message || '未知错误'));
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
-                alert('请求失败，请检查网络。');
+                showError('请求快照因子接口出错，请检查网络或后端日志。');
             })
             .finally(() => {
                 btn.disabled = false;
-                btn.innerHTML = '<i class="bi bi-layers-half me-1"></i> 生成因子快照';
+                btn.innerHTML = '<i class="bi bi-table me-1"></i> 查看V3快照因子';
+                document.getElementById('loading').style.display = 'none';
             });
         });
 
@@ -635,7 +810,9 @@
             document.getElementById('resultBody').innerHTML = '';
             currentResults = [];
             currentKeyword = '';
+            currentResultMode = 'score';
             document.getElementById('resultSearchInput').value = '';
+            updateTableHeader(getStrategyVersion());
             updateResultCount(0);
 
             const scoreUrl = isV3() ? '/anlysis/calculateCandidateScoreV3' : '/anlysis/calculateCandidateScore';
@@ -685,6 +862,18 @@
             return `${integerPart}.${decimalPart.padEnd(4, '0').slice(0, 4)}`;
         }
 
+        function formatAmount(value) {
+            const amount = Number(value);
+            if (!Number.isFinite(amount)) return '-';
+            if (Math.abs(amount) >= 100000000) {
+                return (amount / 100000000).toFixed(2) + '亿';
+            }
+            if (Math.abs(amount) >= 10000) {
+                return (amount / 10000).toFixed(2) + '万';
+            }
+            return amount.toFixed(2);
+        }
+
         document.getElementById('resultSearchInput').addEventListener('input', function() {
             currentKeyword = this.value.trim();
             renderResultRows(filterResults(currentResults, currentKeyword));
@@ -696,15 +885,21 @@
             renderResultRows(currentResults);
         });
 
-        function renderResults(data) {
+        function renderResults(data, mode) {
             if (!data || data.length === 0) {
                 alert('未找到符合条件的数据或计算结果为空。');
                 return;
             }
 
+            currentResultMode = mode || 'score';
             currentResults = data;
             currentKeyword = '';
             document.getElementById('resultSearchInput').value = '';
+            if (currentResultMode === 'factor') {
+                updateTableHeader('V3_FACTORS');
+            } else {
+                updateTableHeader(getStrategyVersion());
+            }
             renderResultRows(currentResults);
             document.getElementById('resultArea').style.display = 'block';
         }
@@ -714,7 +909,7 @@
             body.innerHTML = '';
 
             if (!data || data.length === 0) {
-                const colSpan = isV3() ? 16 : 12;
+                const colSpan = currentResultMode === 'factor' ? 17 : (isV3() ? 16 : 12);
                 body.innerHTML = `<tr><td colspan="${colSpan}" class="text-center text-muted py-4">未匹配到股票代码或简称</td></tr>`;
                 updateResultCount(0);
                 return;
@@ -722,6 +917,30 @@
 
             data.forEach(item => {
                 const tr = document.createElement('tr');
+
+                if (currentResultMode === 'factor') {
+                    tr.innerHTML = `
+                        <td class="text-nowrap">${item.tradeDate || '-'}</td>
+                        <td class="fw-bold">${item.stockCode || '-'}</td>
+                        <td>${item.shortName || '-'}</td>
+                        <td><small class="text-muted">${item.sector || item.market || '-'}</small></td>
+                        <td>${item.price1400 != null ? Number(item.price1400).toFixed(2) : '-'}</td>
+                        <td>${item.price1430 != null ? Number(item.price1430).toFixed(2) : '-'}</td>
+                        <td>${item.returnTo1430 != null ? (item.returnTo1430 * 100).toFixed(2) + '%' : '-'}</td>
+                        <td>${item.tailMomentum != null ? (item.tailMomentum * 100).toFixed(2) + '%' : '-'}</td>
+                        <td>${item.intradayPosition != null ? (item.intradayPosition * 100).toFixed(2) + '%' : '-'}</td>
+                        <td>${item.todayTailAmount != null ? formatAmount(item.todayTailAmount) : '-'}</td>
+                        <td>${item.avgAmount20d != null ? formatAmount(item.avgAmount20d) : '-'}</td>
+                        <td>${item.avgAmplitude20d != null ? (item.avgAmplitude20d * 100).toFixed(2) + '%' : '-'}</td>
+                        <td>${item.shortSampleCount ?? '-'}</td>
+                        <td>${item.shortAdjustedWinRate != null ? (item.shortAdjustedWinRate * 100).toFixed(1) + '%' : '-'}</td>
+                        <td>${item.shortAvgNetReturnBps != null ? Number(item.shortAvgNetReturnBps).toFixed(2) : '-'}</td>
+                        <td>${item.marketRegime || '-'}</td>
+                        <td><span class="badge bg-light text-dark border">${item.sectorRank || '-'}</span></td>
+                    `;
+                    body.appendChild(tr);
+                    return;
+                }
 
                 // 评分着色
                 let scoreClass = 'score-low';

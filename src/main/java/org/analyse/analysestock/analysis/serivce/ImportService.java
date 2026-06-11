@@ -1,6 +1,7 @@
 package org.analyse.analysestock.analysis.serivce;
 
 import org.analyse.analysestock.analysis.vo.GenerationMissingDateResponse;
+import org.analyse.analysestock.analysis.vo.SnapshotTaskProgress;
 
 import java.time.LocalDate;
 
@@ -61,6 +62,12 @@ public interface ImportService {
      * 计算 V3 实时候选股评分。
      */
     java.util.List<org.analyse.analysestock.analysis.entity.RealtimeCandidateScoreResultV3> calculateRealtimeCandidateScoresV3(String stockCode, LocalDate tradeDate);
+
+    java.util.List<org.analyse.analysestock.realtimecandidate.dto.V3FactorSnapshot> listRealtimeCandidateFactorSnapshotsV3(String stockCode, LocalDate tradeDate);
+
+    SnapshotTaskProgress startPrepareSnapshotsV3(LocalDate tradeDate);
+
+    SnapshotTaskProgress getPrepareSnapshotsProgressV3(String taskId);
 
     /**
      * 准备 V3 增强尾盘快照。
